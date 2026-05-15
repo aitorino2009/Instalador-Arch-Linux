@@ -26,6 +26,7 @@ ask() {
     if [[ -n "$default" ]]; then hint="${DIM} [${default}]${NC}"; fi
     echo -ne "\n${BOLD}${BLUE}  ?  ${NC}${BOLD}${prompt}${NC}${hint}: "
     read -r REPLY || true
+    REPLY="$(echo -e "${REPLY}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     if [[ -z "$REPLY" ]]; then REPLY="$default"; fi
 }
 
