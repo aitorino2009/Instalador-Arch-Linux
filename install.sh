@@ -134,7 +134,11 @@ KEYMAP="$PICKED"
 pick "Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened"
 KERNEL="$PICKED"
 
-pick "Bootloader" "grub" "systemd-boot"
+if $UEFI; then
+    pick "Bootloader" "grub" "systemd-boot"
+else
+    pick "Bootloader" "grub"
+fi
 BOOTLOADER="$PICKED"
 
 step "2/3" "Usuario y contraseñas"
@@ -279,7 +283,7 @@ step "·" "Instalando sistema base (esto tarda un poco)"
 pacstrap -K /mnt \
     base "$KERNEL" "${KERNEL}-headers" linux-firmware base-devel \
     "$MICROCODE" \
-    networkmanager git vim sudo curl wget reflector \
+    networkmanager git nvim vim sudo curl wget reflector \
     man-db man-pages bash-completion htop openssh \
     grub efibootmgr os-prober
 log "Sistema base instalado."
