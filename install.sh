@@ -265,8 +265,8 @@ fi
 
 # ── Mirrors ────────────────────────────────────────────────────────────────────
 step "·" "Actualizando mirrors"
-reflector --country Spain,France,Germany --age 12 --protocol https \
-          --sort rate --save /etc/pacman.d/mirrorlist 2>/dev/null \
+reflector --verbose --country Spain,France,Germany --age 12 --protocol https \
+          --sort rate --save /etc/pacman.d/mirrorlist \
     && log "Mirrors actualizados." || warn "reflector falló, usando mirrors existentes."
 
 # ── Microcode ──────────────────────────────────────────────────────────────────
