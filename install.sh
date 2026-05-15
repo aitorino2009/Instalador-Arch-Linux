@@ -23,21 +23,21 @@ step()   { echo -e "\n${BOLD}${MAGENTA}[$1]${NC}${BOLD} $2${NC}"; echo -e "${DIM
 ask() {
     local prompt="$1" default="${2:-}"
     local hint=""
-    [[ -n "$default" ]] && hint="${DIM} [${default}]${NC}"
+    if [[ -n "$default" ]]; then hint="${DIM} [${default}]${NC}"; fi
     echo -ne "\n${BOLD}${BLUE}  ?  ${NC}${BOLD}${prompt}${NC}${hint}: "
-    read -r REPLY
-    [[ -z "$REPLY" ]] && REPLY="$default"
+    read -r REPLY || true
+    if [[ -z "$REPLY" ]]; then REPLY="$default"; fi
 }
 
 # Pregunta sí/no: ask_yn "Pregunta" "s|n" → $YN
 ask_yn() {
     local prompt="$1" default="${2:-s}"
     local opts
-    [[ "$default" == "s" ]] && opts="${BOLD}S${NC}/n" || opts="s/${BOLD}N${NC}"
+    if [[ "$default" == "s" ]]; then opts="${BOLD}S${NC}/n"; else opts="s/${BOLD}N${NC}"; fi
     echo -ne "\n${BOLD}${BLUE}  ?  ${NC}${BOLD}${prompt}${NC} ${DIM}[${opts}]${NC}: "
-    read -r YN
-    [[ -z "$YN" ]] && YN="$default"
-    [[ "$YN" =~ ^[sySY]$ ]] && YN="s" || YN="n"
+    read -r YN || true
+    if [[ -z "$YN" ]]; then YN="$default"; fi
+    if [[ "$YN" =~ ^[sySY]$ ]]; then YN="s"; else YN="n"; fi
 }
 
 # Menú de selección numerado: pick "Título" op1 op2 ... → $PICKED
@@ -73,13 +73,15 @@ ask_pass() {
 
 clear
 cat << 'EOF'
-   _             _       _     _
-  / \   _ __ ___| |__   | |   (_)_ __  _   ___  __
- / _ \ | '__/ __| '_ \  | |   | | '_ \| | | \ \/ /
-/ ___ \| | | (__| | | | | |___| | | | | |_| |>  <
-/_/   \_\_|  \___|_| |_| |_____|_|_| |_|\__,_/_/\_\
+    ___    _ __                ____             __        __                      ____           __        __          __              ___              __       __    _                 
+   /   |  (_) /_____  _____   / __ \____  _____/ /_____ _/ /__  _____            /  _/___  _____/ /_____ _/ /___ _____/ /___  _____   /   |  __________/ /_     / /   (_)___  __  ___  __
+  / /| | / / __/ __ \/ ___/  / /_/ / __ \/ ___/ __/ __ `/ / _ \/ ___/  ______    / // __ \/ ___/ __/ __ `/ / __ `/ __  / __ \/ ___/  / /| | / ___/ ___/ __ \   / /   / / __ \/ / / / |/_/
+ / ___ |/ / /_/ /_/ / /     / ____/ /_/ / /  / /_/ /_/ / /  __(__  )  /_____/  _/ // / / (__  ) /_/ /_/ / / /_/ / /_/ / /_/ / /     / ___ |/ /  / /__/ / / /  / /___/ / / / / /_/ />  <  
+/_/  |_/_/\__/\____/_/     /_/    \____/_/   \__/\__,_/_/\___/____/           /___/_/ /_/____/\__/\__,_/_/\__,_/\__,_/\____/_/     /_/  |_/_/   \___/_/ /_/  /_____/_/_/ /_/\__,_/_/|_|  
+                                                                                                                                                                                                                                                                                                                                                                   
+                                                                                                                                                                                     
 
-  Instalador automático — Responde las preguntas y siéntate.
+  Instalador automático de Arch Linux; responde las preguntas y siéntate.
 EOF
 echo -e "${DIM}$(printf '═%.0s' {1..54})${NC}\n"
 
@@ -225,7 +227,12 @@ else
     parted -s "$DISK" mkpart primary 1MiB 3MiB
     parted -s "$DISK" set 1 bios_grub on
     if [[ "$SWAP_SIZE" != "0" ]]; then
-        local swap_mb=$(( ${SWAP_SIZE//[GgMm]/} * ( [[ "$SWAP_SIZE" == *[Gg] ]] && echo 1024 || echo 1 ) ))
+        local_swap_num="${SWAP_SIZE//[GgMm]/}"
+        if [[ "$SWAP_SIZE" == *[Gg] ]]; then
+            swap_mb=$(( local_swap_num * 1024 ))
+        else
+            swap_mb="$local_swap_num"
+        fi
         parted -s "$DISK" mkpart primary linux-swap 3MiB "$((3 + swap_mb))MiB"
         parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb))MiB" 100%
         PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3)
