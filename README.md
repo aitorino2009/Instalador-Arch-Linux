@@ -1,6 +1,6 @@
 # Instalador Arch Linux 🏹
 
-Instalador interactivo de Arch Linux. Sin tocar archivos, sin configuración previa.  
+Instalador interactivo de Arch Linux. Sin tocar archivos y sin configuración previa.  
 Arranca la ISO, clona el repositorio, ejecuta el script y responde las preguntas.
 
 ---
@@ -40,7 +40,6 @@ Tras confirmar, **corre solo**. En 5–10 min tienes Arch instalado.
 ```bash
 iwctl
   device list
-  station wlan0 scan
   station wlan0 get-networks
   station wlan0 connect "NombreRed"
   exit
