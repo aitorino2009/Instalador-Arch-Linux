@@ -57,5 +57,5 @@ iwctl
 
 - Detecta UEFI/BIOS automáticamente.
 - Detecta microcode Intel/AMD automáticamente.
-- Si el AUR helper o los dotfiles fallan, el sistema base queda intacto — se avisa y se continúa.
+- Si el AUR helper o los dotfiles fallan, el sistema base queda intacto. El programa avisa y continúa.
 - `reflector.timer` se habilita para mantener mirrors actualizados.
