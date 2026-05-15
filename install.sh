@@ -225,7 +225,6 @@ if $UEFI; then
 else
     parted -s "$DISK" mklabel msdos
     parted -s "$DISK" mkpart primary 1MiB 3MiB
-    parted -s "$DISK" set 1 bios_grub on
     if [[ "$SWAP_SIZE" != "0" ]]; then
         local_swap_num="${SWAP_SIZE//[GgMm]/}"
         if [[ "$SWAP_SIZE" == *[Gg] ]]; then
