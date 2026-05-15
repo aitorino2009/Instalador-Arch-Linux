@@ -1,7 +1,7 @@
-# arch-installer 🏹
+# Instalador Arch Linux 🏹
 
 Instalador interactivo de Arch Linux. Sin tocar archivos, sin configuración previa.  
-Arranca la ISO, clona el repo, ejecuta el script y responde las preguntas.
+Arranca la ISO, clona el repositorio, ejecuta el script y responde las preguntas.
 
 ---
 
@@ -15,8 +15,8 @@ iwctl station wlan0 connect "TuRed"
 
 # 3. Clonar y ejecutar
 pacman -Sy --noconfirm git
-git clone https://github.com/TUUSUARIO/arch-installer
-bash arch-installer/install.sh
+git clone https://github.com/aitorino2009/Instalador-Arch-Linux
+bash Instalador-Arch-Linux/install.sh
 ```
 
 El script te preguntará:
