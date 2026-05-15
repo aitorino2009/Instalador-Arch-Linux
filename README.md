@@ -31,7 +31,7 @@ El script te preguntará:
 - Dotfiles desde un repo git (opcional)
 - SSH habilitado (opcional)
 
-Tras confirmar, **corre solo**. En 5–10 min tienes Arch instalado.
+Tras confirmar, **corre solo**. En 5–10 min tienes Arch instalado (dependiendo de la velocidad de tu internet).
 
 ---
 
