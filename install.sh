@@ -72,6 +72,17 @@ ask_pass() {
     done
 }
 
+# Convierte un tamaño con sufijo (ej. 8G, 512M) a megabytes enteros
+convertir_a_mb() {
+    local input="$1"
+    local val="${input//[GgMm]/}"
+    if [[ "$input" == *[Gg] ]]; then
+        echo $(( val * 1024 ))
+    else
+        echo "$val"
+    fi
+}
+
 clear
 cat << 'EOF'
    ___   _ __             ___           __       __      
@@ -284,15 +295,6 @@ read -r CONFIRM
 # ══════════════════════════════════════════════════════════════════════════════
 #  HELPERS INTERNOS
 # ══════════════════════════════════════════════════════════════════════════════
-convertir_a_mb() {
-    local v="${1//[GgMm]/}"
-    if [[ "$1" == *[Gg] ]]; then
-        echo $(( v * 1024 ))
-    else
-        echo "$v"
-    fi
-}
-
 part() {
     local disk="$1" num="$2"
     if [[ "$disk" == *nvme* ]] || [[ "$disk" == *mmcblk* ]]; then
