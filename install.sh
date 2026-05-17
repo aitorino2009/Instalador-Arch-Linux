@@ -107,10 +107,35 @@ ask "Disco destino" "/dev/sda"
 DISK="$REPLY"
 [[ -b "$DISK" ]] || error "El disco '$DISK' no existe."
 
+DISK_SIZE_BYTES=$(lsblk -b -no SIZE "$DISK" | head -n1)
+DISK_SIZE_GB=$(( DISK_SIZE_BYTES / 1024 / 1024 / 1024 ))
+
 ask_yn "¿Activar swap?" "s"
 if [[ "$YN" == "s" ]]; then
-    ask "Tamaño de swap" "8G"
-    SWAP_SIZE="$REPLY"
+    while true; do
+        ask "Tamaño de swap" "8G"
+        SWAP_SIZE="$REPLY"
+        
+        # Validar si el tamaño de swap es coherente con la capacidad del disco
+        swap_mb=$(convertir_a_mb "$SWAP_SIZE")
+        swap_gb=$(( swap_mb / 1024 ))
+        
+        # Necesitamos al menos 10GB libres en el disco para una instalación funcional básica
+        min_required_gb=10
+        if (( swap_gb >= DISK_SIZE_GB - min_required_gb )); then
+            warn "La partición de Swap de $SWAP_SIZE es demasiado grande para tu disco de $DISK_SIZE_GB GB."
+            max_swap_gb=$(( DISK_SIZE_GB - min_required_gb ))
+            if (( max_swap_gb <= 0 )); then
+                warn "Tu disco de $DISK_SIZE_GB GB es demasiado pequeño para soportar Swap. Se desactivará automáticamente."
+                SWAP_SIZE="0"
+                break
+            else
+                info "Por favor, elige un tamaño de Swap menor (máximo recomendado para este disco: ${max_swap_gb}G)."
+            fi
+        else
+            break
+        fi
+    done
 else
     SWAP_SIZE="0"
 fi
@@ -119,30 +144,54 @@ ask_yn "¿Crear una partición separada para /home?" "n"
 SEPARATE_HOME="$YN"
 ROOT_SIZE="0"
 if [[ "$SEPARATE_HOME" == "s" ]]; then
-    DISK_SIZE_BYTES=$(lsblk -b -no SIZE "$DISK" | head -n1)
-    DISK_SIZE_GB=$(( DISK_SIZE_BYTES / 1024 / 1024 / 1024 ))
     dim "  El espacio sobrante tras la raíz se asignará a /home automáticamente."
     dim "  Tamaño total detectado del disco: ${DISK_SIZE_GB} GB"
+    
+    # Calcular tamaño sugerido de raíz dinámicamente (60% del espacio útil, máx 40G, mín 10G)
+    swap_gb_temp=$(( $(convertir_a_mb "$SWAP_SIZE") / 1024 ))
+    usable_gb_temp=$(( DISK_SIZE_GB - swap_gb_temp - 1 ))
+    suggested_root_gb=$(( usable_gb_temp * 60 / 100 ))
+    if (( suggested_root_gb > 40 )); then
+        suggested_root_gb=40
+    elif (( suggested_root_gb < 10 )); then
+        suggested_root_gb=10
+    fi
+    
+    # Ajuste fino si el espacio útil es crítico
+    if (( suggested_root_gb >= usable_gb_temp )); then
+        suggested_root_gb=$(( usable_gb_temp - 2 )) # Reservamos al menos 2GB para /home
+        if (( suggested_root_gb < 10 )); then
+            suggested_root_gb=10 # Mínimo absoluto para que Arch sea usable
+        fi
+    fi
+    
     while true; do
-        ask "Tamaño de la partición raíz (/)" "40G"
+        ask "Tamaño de la partición raíz (/)" "${suggested_root_gb}G"
         ROOT_SIZE="$REPLY"
         
         # Validar si los tamaños solicitados caben físicamente en el disco
-        local swap_mb efi_mb root_mb total_req_mb total_req_gb
         swap_mb=$(convertir_a_mb "$SWAP_SIZE")
         root_mb=$(convertir_a_mb "$ROOT_SIZE")
         efi_mb=512
         total_req_mb=$(( swap_mb + root_mb + efi_mb ))
         total_req_gb=$(( (total_req_mb + 1023) / 1024 )) # Redondeo hacia arriba en GB
         
-        if (( total_req_gb >= DISK_SIZE_GB )); then
+        # Límite máximo para dejar al menos 2 GB a la partición /home
+        max_allowed_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 ))
+        
+        if (( root_mb < 10240 )); then
+            warn "El tamaño solicitado de raíz ($ROOT_SIZE) es inferior al mínimo recomendado para que Arch sea funcional (10 GB)."
+            info "Por favor, elige un tamaño de al menos 10G."
+        elif (( total_req_gb >= DISK_SIZE_GB )); then
             warn "El tamaño solicitado para Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI ($efi_mb MB) = $total_req_gb GB supera el tamaño real del disco ($DISK_SIZE_GB GB)."
-            local max_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 )) # Deja un margen de seguridad de 2GB
-            if (( max_root_mb <= 0 )); then
-                error "El disco es demasiado pequeño ($DISK_SIZE_GB GB) para la Swap asignada ($SWAP_SIZE). Reduce la Swap o desactívala."
+            if (( max_allowed_root_mb <= 0 )); then
+                error "El disco de $DISK_SIZE_GB GB es demasiado pequeño para la Swap configurada ($SWAP_SIZE) y una partición /home. Reduce la Swap."
             else
-                info "Por favor, elige un tamaño menor para la raíz (máximo recomendado: $(( max_root_mb / 1024 ))G)."
+                info "Por favor, elige un tamaño menor para la raíz (máximo recomendado: $(( max_allowed_root_mb / 1024 ))G para dejar espacio a /home)."
             fi
+        elif (( root_mb > max_allowed_root_mb )); then
+            warn "El tamaño de Raíz ($ROOT_SIZE) no deja espacio útil suficiente para la partición /home (deben quedar libres al menos 2 GB)."
+            info "Para permitir separar /home en este disco, el tamaño máximo de la raíz es de $(( max_allowed_root_mb / 1024 ))G."
         else
             break
         fi
