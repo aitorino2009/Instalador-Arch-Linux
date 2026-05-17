@@ -510,16 +510,16 @@ if [[ "\$BOOTLOADER" == "grub" ]]; then
     sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg
 else
-    bootctl install
+    bootctl --esp-path=/boot/efi install
     ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
-    mkdir -p /boot/loader/entries
-    cat > /boot/loader/loader.conf <<EOF
+    mkdir -p /boot/efi/loader/entries
+    cat > /boot/efi/loader/loader.conf <<EOF
 default  arch.conf
 timeout  3
 console-mode max
 editor   no
 EOF
-    cat > /boot/loader/entries/arch.conf <<EOF
+    cat > /boot/efi/loader/entries/arch.conf <<EOF
 title   Arch Linux
 linux   /vmlinuz-\${KERNEL}
 initrd  /\${MICROCODE}.img
