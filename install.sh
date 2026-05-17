@@ -115,6 +115,15 @@ else
     SWAP_SIZE="0"
 fi
 
+ask_yn "¿Crear una partición separada para /home?" "n"
+SEPARATE_HOME="$YN"
+ROOT_SIZE="0"
+if [[ "$SEPARATE_HOME" == "s" ]]; then
+    dim "  El espacio sobrante tras la raíz se asignará a /home automáticamente."
+    ask "Tamaño de la partición raíz (/)" "40G"
+    ROOT_SIZE="$REPLY"
+fi
+
 # ── Sistema ────────────────────────────────────────────────────────────────────
 ask "Hostname" "archbox"
 HOSTNAME="$REPLY"
@@ -176,6 +185,12 @@ echo -e "${BOLD}${BLUE}║             RESUMEN DE INSTALACIÓN                  
 echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════╝${NC}\n"
 echo -e "  ${DIM}Disco:${NC}       ${BOLD}$DISK${NC}   ${RED}(se borrará todo el contenido)${NC}"
 echo -e "  ${DIM}Swap:${NC}        $( [[ "$SWAP_SIZE" == "0" ]] && echo "desactivada" || echo "$SWAP_SIZE" )"
+if [[ "$SEPARATE_HOME" == "s" ]]; then
+    echo -e "  ${DIM}Raíz (/):${NC}    $ROOT_SIZE"
+    echo -e "  ${DIM}Home (/home):${NC}${GREEN} separada ${NC}${DIM}(resto del disco)${NC}"
+else
+    echo -e "  ${DIM}Raíz (/):${NC}    todo el disco  ${DIM}(sin /home separado)${NC}"
+fi
 echo -e "  ${DIM}Hostname:${NC}    $HOSTNAME"
 echo -e "  ${DIM}Timezone:${NC}    $TIMEZONE"
 echo -e "  ${DIM}Locale:${NC}      $LOCALE   teclado: $KEYMAP"
@@ -218,28 +233,51 @@ if $UEFI; then
     sgdisk -n 1:0:+512M  -t 1:ef00 -c 1:"EFI"  "$DISK"
     if [[ "$SWAP_SIZE" != "0" ]]; then
         sgdisk -n 2:0:+"$SWAP_SIZE" -t 2:8200 -c 2:"swap" "$DISK"
-        sgdisk -n 3:0:0             -t 3:8300 -c 3:"root" "$DISK"
-        PART_EFI=$(part "$DISK" 1); PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3)
+        if [[ "$SEPARATE_HOME" == "s" ]]; then
+            sgdisk -n 3:0:+"$ROOT_SIZE" -t 3:8300 -c 3:"root" "$DISK"
+            sgdisk -n 4:0:0             -t 4:8300 -c 4:"home" "$DISK"
+            PART_EFI=$(part "$DISK" 1); PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3); PART_HOME=$(part "$DISK" 4)
+        else
+            sgdisk -n 3:0:0 -t 3:8300 -c 3:"root" "$DISK"
+            PART_EFI=$(part "$DISK" 1); PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3); PART_HOME=""
+        fi
     else
-        sgdisk -n 2:0:0 -t 2:8300 -c 2:"root" "$DISK"
-        PART_EFI=$(part "$DISK" 1); PART_SWAP=""; PART_ROOT=$(part "$DISK" 2)
+        if [[ "$SEPARATE_HOME" == "s" ]]; then
+            sgdisk -n 2:0:+"$ROOT_SIZE" -t 2:8300 -c 2:"root" "$DISK"
+            sgdisk -n 3:0:0             -t 3:8300 -c 3:"home" "$DISK"
+            PART_EFI=$(part "$DISK" 1); PART_SWAP=""; PART_ROOT=$(part "$DISK" 2); PART_HOME=$(part "$DISK" 3)
+        else
+            sgdisk -n 2:0:0 -t 2:8300 -c 2:"root" "$DISK"
+            PART_EFI=$(part "$DISK" 1); PART_SWAP=""; PART_ROOT=$(part "$DISK" 2); PART_HOME=""
+        fi
     fi
 else
     parted -s "$DISK" mklabel msdos
     parted -s "$DISK" mkpart primary 1MiB 3MiB
+    # Función auxiliar: convierte un tamaño (ej. 8G, 512M) a megabytes enteros
+    _a_mb() { local v="${1//[GgMm]/}"; [[ "$1" == *[Gg] ]] && echo $(( v * 1024 )) || echo "$v"; }
     if [[ "$SWAP_SIZE" != "0" ]]; then
-        local_swap_num="${SWAP_SIZE//[GgMm]/}"
-        if [[ "$SWAP_SIZE" == *[Gg] ]]; then
-            swap_mb=$(( local_swap_num * 1024 ))
-        else
-            swap_mb="$local_swap_num"
-        fi
+        swap_mb=$(_a_mb "$SWAP_SIZE")
         parted -s "$DISK" mkpart primary linux-swap 3MiB "$((3 + swap_mb))MiB"
-        parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb))MiB" 100%
-        PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3)
+        if [[ "$SEPARATE_HOME" == "s" ]]; then
+            root_mb=$(_a_mb "$ROOT_SIZE")
+            parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb))MiB" "$((3 + swap_mb + root_mb))MiB"
+            parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb + root_mb))MiB" 100%
+            PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3); PART_HOME=$(part "$DISK" 4)
+        else
+            parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb))MiB" 100%
+            PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3); PART_HOME=""
+        fi
     else
-        parted -s "$DISK" mkpart primary ext4 3MiB 100%
-        PART_SWAP=""; PART_ROOT=$(part "$DISK" 2)
+        if [[ "$SEPARATE_HOME" == "s" ]]; then
+            root_mb=$(_a_mb "$ROOT_SIZE")
+            parted -s "$DISK" mkpart primary ext4 3MiB "$((3 + root_mb))MiB"
+            parted -s "$DISK" mkpart primary ext4 "$((3 + root_mb))MiB" 100%
+            PART_SWAP=""; PART_ROOT=$(part "$DISK" 2); PART_HOME=$(part "$DISK" 3)
+        else
+            parted -s "$DISK" mkpart primary ext4 3MiB 100%
+            PART_SWAP=""; PART_ROOT=$(part "$DISK" 2); PART_HOME=""
+        fi
     fi
     PART_EFI=""
 fi
@@ -256,10 +294,18 @@ if [[ -n "$PART_SWAP" ]]; then
 fi
 info "ext4 → $PART_ROOT"
 mkfs.ext4 -L "root" -F "$PART_ROOT"
+if [[ -n "$PART_HOME" ]]; then
+    info "ext4 → $PART_HOME"
+    mkfs.ext4 -L "home" -F "$PART_HOME"
+fi
 log "Formato completo."
 
 # ── Montaje ────────────────────────────────────────────────────────────────────
 mount "$PART_ROOT" /mnt
+if [[ -n "$PART_HOME" ]]; then
+    mkdir -p /mnt/home
+    mount "$PART_HOME" /mnt/home
+fi
 if $UEFI; then
     mkdir -p /mnt/boot/efi
     mount "$PART_EFI" /mnt/boot/efi
@@ -319,6 +365,7 @@ UEFI=$UEFI
 DISK="$DISK"
 PART_EFI="${PART_EFI:-}"
 PART_ROOT="$PART_ROOT"
+PART_HOME="${PART_HOME:-}"
 AUR_HELPER="$AUR_HELPER"
 DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
