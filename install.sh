@@ -83,6 +83,18 @@ convertir_a_mb() {
     fi
 }
 
+# Valida que el tamaño tenga formato correcto: número seguido de G o M (ej. 8G, 512M)
+# Devuelve 0 si es válido, 1 si no lo es (imprime un aviso en caso de error)
+validar_tamano() {
+    local input="$1" etiqueta="${2:-tamaño}"
+    if [[ ! "$input" =~ ^[0-9]+[GgMm]$ ]]; then
+        warn "Formato inválido: '${input}'. Debes indicar un número seguido de la unidad G o M."
+        info "Ejemplos válidos: ${BOLD}8G${NC}${CYAN}  (8 gigabytes)${NC}   ${BOLD}512M${NC}${CYAN}  (512 megabytes)${NC}"
+        return 1
+    fi
+    return 0
+}
+
 clear
 cat << 'EOF'
    ___   _ __             ___           __       __      
@@ -127,7 +139,10 @@ if [[ "$YN" == "s" ]]; then
         ask "Tamaño de swap" "8G"
         SWAP_SIZE="$REPLY"
         
-        # Validar si el tamaño de swap es coherente con la capacidad del disco
+        # Paso 1: Validar formato (debe terminar en G o M)
+        validar_tamano "$SWAP_SIZE" || continue
+        
+        # Paso 2: Validar si el tamaño de swap es coherente con la capacidad del disco
         swap_mb=$(convertir_a_mb "$SWAP_SIZE")
         swap_gb=$(( swap_mb / 1024 ))
         
@@ -180,7 +195,10 @@ if [[ "$SEPARATE_HOME" == "s" ]]; then
         ask "Tamaño de la partición raíz (/)" "${suggested_root_gb}G"
         ROOT_SIZE="$REPLY"
         
-        # Validar si los tamaños solicitados caben físicamente en el disco
+        # Paso 1: Validar formato (debe terminar en G o M)
+        validar_tamano "$ROOT_SIZE" || continue
+        
+        # Paso 2: Validar si los tamaños solicitados caben físicamente en el disco
         swap_mb=$(convertir_a_mb "$SWAP_SIZE")
         root_mb=$(convertir_a_mb "$ROOT_SIZE")
         efi_mb=512
