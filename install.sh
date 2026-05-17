@@ -123,12 +123,22 @@ if [[ "$SEPARATE_HOME" == "s" ]]; then
     DISK_SIZE_GB=$(( DISK_SIZE_BYTES / 1024 / 1024 / 1024 ))
     dim "  El espacio sobrante tras la raíz se asignará a /home automáticamente."
     dim "  Tamaño total detectado del disco: ${DISK_SIZE_GB} GB"
+    
+    # Calcular tamaño sugerido de raíz dinámicamente (60% del espacio útil, máx 40G, mín 10G)
+    swap_gb_temp=$(( $(convertir_a_mb "$SWAP_SIZE") / 1024 ))
+    usable_gb_temp=$(( DISK_SIZE_GB - swap_gb_temp - 1 ))
+    suggested_root_gb=$(( usable_gb_temp * 60 / 100 ))
+    if (( suggested_root_gb > 40 )); then
+        suggested_root_gb=40
+    elif (( suggested_root_gb < 10 )); then
+        suggested_root_gb=10
+    fi
+    
     while true; do
-        ask "Tamaño de la partición raíz (/)" "40G"
+        ask "Tamaño de la partición raíz (/)" "${suggested_root_gb}G"
         ROOT_SIZE="$REPLY"
         
         # Validar si los tamaños solicitados caben físicamente en el disco
-        local swap_mb efi_mb root_mb total_req_mb total_req_gb
         swap_mb=$(convertir_a_mb "$SWAP_SIZE")
         root_mb=$(convertir_a_mb "$ROOT_SIZE")
         efi_mb=512
@@ -137,7 +147,7 @@ if [[ "$SEPARATE_HOME" == "s" ]]; then
         
         if (( total_req_gb >= DISK_SIZE_GB )); then
             warn "El tamaño solicitado para Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI ($efi_mb MB) = $total_req_gb GB supera el tamaño real del disco ($DISK_SIZE_GB GB)."
-            local max_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 )) # Deja un margen de seguridad de 2GB
+            max_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 )) # Deja un margen de seguridad de 2GB
             if (( max_root_mb <= 0 )); then
                 error "El disco es demasiado pequeño ($DISK_SIZE_GB GB) para la Swap asignada ($SWAP_SIZE). Reduce la Swap o desactívala."
             else
