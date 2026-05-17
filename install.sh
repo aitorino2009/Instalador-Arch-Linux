@@ -119,9 +119,34 @@ ask_yn "¿Crear una partición separada para /home?" "n"
 SEPARATE_HOME="$YN"
 ROOT_SIZE="0"
 if [[ "$SEPARATE_HOME" == "s" ]]; then
+    DISK_SIZE_BYTES=$(lsblk -b -no SIZE "$DISK" | head -n1)
+    DISK_SIZE_GB=$(( DISK_SIZE_BYTES / 1024 / 1024 / 1024 ))
     dim "  El espacio sobrante tras la raíz se asignará a /home automáticamente."
-    ask "Tamaño de la partición raíz (/)" "40G"
-    ROOT_SIZE="$REPLY"
+    dim "  Tamaño total detectado del disco: ${DISK_SIZE_GB} GB"
+    while true; do
+        ask "Tamaño de la partición raíz (/)" "40G"
+        ROOT_SIZE="$REPLY"
+        
+        # Validar si los tamaños solicitados caben físicamente en el disco
+        local swap_mb efi_mb root_mb total_req_mb total_req_gb
+        swap_mb=$(convertir_a_mb "$SWAP_SIZE")
+        root_mb=$(convertir_a_mb "$ROOT_SIZE")
+        efi_mb=512
+        total_req_mb=$(( swap_mb + root_mb + efi_mb ))
+        total_req_gb=$(( (total_req_mb + 1023) / 1024 )) # Redondeo hacia arriba en GB
+        
+        if (( total_req_gb >= DISK_SIZE_GB )); then
+            warn "El tamaño solicitado para Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI ($efi_mb MB) = $total_req_gb GB supera el tamaño real del disco ($DISK_SIZE_GB GB)."
+            local max_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 )) # Deja un margen de seguridad de 2GB
+            if (( max_root_mb <= 0 )); then
+                error "El disco es demasiado pequeño ($DISK_SIZE_GB GB) para la Swap asignada ($SWAP_SIZE). Reduce la Swap o desactívala."
+            else
+                info "Por favor, elige un tamaño menor para la raíz (máximo recomendado: $(( max_root_mb / 1024 ))G)."
+            fi
+        else
+            break
+        fi
+    done
 fi
 
 # ── Sistema ────────────────────────────────────────────────────────────────────
@@ -210,6 +235,15 @@ read -r CONFIRM
 # ══════════════════════════════════════════════════════════════════════════════
 #  HELPERS INTERNOS
 # ══════════════════════════════════════════════════════════════════════════════
+convertir_a_mb() {
+    local v="${1//[GgMm]/}"
+    if [[ "$1" == *[Gg] ]]; then
+        echo $(( v * 1024 ))
+    else
+        echo "$v"
+    fi
+}
+
 part() {
     local disk="$1" num="$2"
     if [[ "$disk" == *nvme* ]] || [[ "$disk" == *mmcblk* ]]; then
@@ -254,13 +288,11 @@ if $UEFI; then
 else
     parted -s "$DISK" mklabel msdos
     parted -s "$DISK" mkpart primary 1MiB 3MiB
-    # Función auxiliar: convierte un tamaño (ej. 8G, 512M) a megabytes enteros
-    _a_mb() { local v="${1//[GgMm]/}"; [[ "$1" == *[Gg] ]] && echo $(( v * 1024 )) || echo "$v"; }
     if [[ "$SWAP_SIZE" != "0" ]]; then
-        swap_mb=$(_a_mb "$SWAP_SIZE")
+        swap_mb=$(convertir_a_mb "$SWAP_SIZE")
         parted -s "$DISK" mkpart primary linux-swap 3MiB "$((3 + swap_mb))MiB"
         if [[ "$SEPARATE_HOME" == "s" ]]; then
-            root_mb=$(_a_mb "$ROOT_SIZE")
+            root_mb=$(convertir_a_mb "$ROOT_SIZE")
             parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb))MiB" "$((3 + swap_mb + root_mb))MiB"
             parted -s "$DISK" mkpart primary ext4 "$((3 + swap_mb + root_mb))MiB" 100%
             PART_SWAP=$(part "$DISK" 2); PART_ROOT=$(part "$DISK" 3); PART_HOME=$(part "$DISK" 4)
@@ -270,7 +302,7 @@ else
         fi
     else
         if [[ "$SEPARATE_HOME" == "s" ]]; then
-            root_mb=$(_a_mb "$ROOT_SIZE")
+            root_mb=$(convertir_a_mb "$ROOT_SIZE")
             parted -s "$DISK" mkpart primary ext4 3MiB "$((3 + root_mb))MiB"
             parted -s "$DISK" mkpart primary ext4 "$((3 + root_mb))MiB" 100%
             PART_SWAP=""; PART_ROOT=$(part "$DISK" 2); PART_HOME=$(part "$DISK" 3)
