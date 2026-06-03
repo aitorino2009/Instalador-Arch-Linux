@@ -155,9 +155,9 @@ while true; do
             if [[ "$ACTIVATE_SWAP" == "s" ]]; then PASO=3; else SWAP_SIZE="0"; PASO=4; fi
             ;;
         3)
-            ask "Tamaño de swap" "${SWAP_SIZE:-8G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ask "Tamaño de swap" "${SWAP_SIZE_OK:-8G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             SWAP_SIZE="$REPLY"
-            validar_tamano "$SWAP_SIZE" || continue
+            if ! validar_tamano "$SWAP_SIZE"; then SWAP_SIZE=""; continue; fi
             
             swap_mb=$(convertir_a_mb "$SWAP_SIZE")
             swap_gb=$(( swap_mb / 1024 ))
@@ -173,9 +173,11 @@ while true; do
                     PASO=4
                 else
                     info "Por favor, elige un tamaño de Swap menor (máximo recomendado: ${max_swap_gb}G)."
+                    SWAP_SIZE=""  # limpiar para que el default no muestre el valor inválido
                 fi
                 continue
             fi
+            SWAP_SIZE_OK="$SWAP_SIZE"  # valor confirmado como válido
             HISTORIAL+=("$PASO")
             PASO=4
             ;;
@@ -200,10 +202,10 @@ while true; do
                 if (( suggested_root_gb < 10 )); then suggested_root_gb=10; fi
             fi
             
-            ask "Tamaño de la partición raíz (/)" "${ROOT_SIZE:-${suggested_root_gb}G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ask "Tamaño de la partición raíz (/)" "${ROOT_SIZE_OK:-${suggested_root_gb}G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             ROOT_SIZE="$REPLY"
             
-            validar_tamano "$ROOT_SIZE" || continue
+            if ! validar_tamano "$ROOT_SIZE"; then ROOT_SIZE=""; continue; fi
             
             swap_mb=$(convertir_a_mb "$SWAP_SIZE")
             root_mb=$(convertir_a_mb "$ROOT_SIZE")
@@ -215,7 +217,7 @@ while true; do
             if (( root_mb < 10240 )); then
                 warn "El tamaño solicitado de raíz ($ROOT_SIZE) es inferior al mínimo recomendado (10 GB)."
                 info "Por favor, elige un tamaño de al menos 10G."
-                continue
+                ROOT_SIZE=""; continue
             elif (( total_req_gb >= DISK_SIZE_GB )); then
                 warn "Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI = $total_req_gb GB supera el disco ($DISK_SIZE_GB GB)."
                 if (( max_allowed_root_mb <= 0 )); then
@@ -223,12 +225,13 @@ while true; do
                 else
                     info "Elige un tamaño menor para la raíz (máximo recomendado: $(( max_allowed_root_mb / 1024 ))G)."
                 fi
-                continue
+                ROOT_SIZE=""; continue
             elif (( root_mb > max_allowed_root_mb )); then
                 warn "Raíz ($ROOT_SIZE) no deja espacio útil para /home (mínimo 2 GB)."
                 info "Tamaño máximo de raíz permitido: $(( max_allowed_root_mb / 1024 ))G."
-                continue
+                ROOT_SIZE=""; continue
             fi
+            ROOT_SIZE_OK="$ROOT_SIZE"  # valor confirmado como válido
             HISTORIAL+=("$PASO")
             PASO=6
             ;;
@@ -372,6 +375,23 @@ part() {
 #  FASE 2 — INSTALACIÓN AUTOMÁTICA
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── Comprobación de montajes previos ──────────────────────────────────────────
+if mountpoint -q /mnt 2>/dev/null || grep -q '^[^ ]* /mnt' /proc/mounts 2>/dev/null; then
+    echo ""
+    warn "Se ha detectado que ${BOLD}/mnt${NC}${YELLOW} ya tiene particiones montadas (posible instalación previa)."
+    echo -ne "\n${BOLD}  ¿Desmontar todo y continuar? (s/n):${NC} "
+    read -r _UMOUNT_CONFIRM
+    if [[ "$_UMOUNT_CONFIRM" =~ ^[sS]$ ]]; then
+        info "Desmontando /mnt..."
+        swapoff -a 2>/dev/null || true
+        umount -R /mnt 2>/dev/null || true
+        log "Desmontado. Continuando con la instalación."
+    else
+        info "Instalación cancelada por el usuario."
+        exit 0
+    fi
+fi
+
 # ── Particionado ───────────────────────────────────────────────────────────────
 step "·" "Particionando $DISK"
 wipefs -af "$DISK" &>/dev/null
@@ -459,9 +479,20 @@ fi
 
 # ── Mirrors ────────────────────────────────────────────────────────────────────
 step "·" "Actualizando mirrors"
+info "(Ctrl+C para omitir y usar los mirrors actuales)"
+_MIRRORS_OK=false
+trap '_MIRRORS_OK=interrupted' INT
 reflector --verbose --country Spain,France,Germany --age 12 --protocol https \
-          --sort rate --save /etc/pacman.d/mirrorlist \
-    && log "Mirrors actualizados." || warn "reflector falló, usando mirrors existentes."
+          --sort rate --save /etc/pacman.d/mirrorlist && _MIRRORS_OK=true || true
+trap - INT
+if [[ "$_MIRRORS_OK" == "true" ]]; then
+    log "Mirrors actualizados."
+elif [[ "$_MIRRORS_OK" == "interrupted" ]]; then
+    echo ""
+    warn "Actualización de mirrors cancelada. Usando los mirrors que ya tiene la ISO."
+else
+    warn "reflector falló. Usando los mirrors que ya tiene la ISO."
+fi
 
 # ── Microcode ──────────────────────────────────────────────────────────────────
 CPU_VENDOR=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
