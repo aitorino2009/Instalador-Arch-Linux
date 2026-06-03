@@ -27,6 +27,7 @@ ask() {
     echo -ne "\n${BOLD}${BLUE}  ?  ${NC}${BOLD}${prompt}${NC}${hint}: "
     read -r REPLY || true
     REPLY="$(echo -e "${REPLY}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    if [[ "$REPLY" == "<" ]]; then return 99; fi
     if [[ -z "$REPLY" ]]; then REPLY="$default"; fi
 }
 
@@ -37,6 +38,7 @@ ask_yn() {
     if [[ "$default" == "s" ]]; then opts="${BOLD}S${NC}/n"; else opts="s/${BOLD}N${NC}"; fi
     echo -ne "\n${BOLD}${BLUE}  ?  ${NC}${BOLD}${prompt}${NC} ${DIM}[${opts}]${NC}: "
     read -r YN || true
+    if [[ "$YN" == "<" ]]; then return 99; fi
     if [[ -z "$YN" ]]; then YN="$default"; fi
     if [[ "$YN" =~ ^[sySY]$ ]]; then YN="s"; else YN="n"; fi
 }
@@ -52,6 +54,7 @@ pick() {
     while true; do
         echo -ne "     ${DIM}Elige [1-${#options[@]}]:${NC} "
         read -r SEL
+        if [[ "$SEL" == "<" ]]; then return 99; fi
         if [[ "$SEL" =~ ^[0-9]+$ ]] && (( SEL >= 1 && SEL <= ${#options[@]} )); then
             PICKED="${options[$((SEL-1))]}"; break
         fi
@@ -65,8 +68,10 @@ ask_pass() {
     while true; do
         echo -ne "\n${BOLD}${BLUE}  ?  ${NC}${BOLD}${prompt}${NC}: "
         read -rs P1; echo
+        if [[ "$P1" == "<" ]]; then return 99; fi
         echo -ne "     ${DIM}Confirma:${NC} "
         read -rs P2; echo
+        if [[ "$P2" == "<" ]]; then return 99; fi
         if [[ "$P1" == "$P2" ]]; then PASS="$P1"; break
         else echo -e "     ${RED}No coinciden, inténtalo de nuevo.${NC}"; fi
     done
@@ -119,167 +124,207 @@ echo -e "  ${GREEN}✔${NC} Modo arranque: ${BOLD}$($UEFI && echo 'UEFI' || echo
 #  FASE 1 — PREGUNTAS
 # ══════════════════════════════════════════════════════════════════════════════
 
-step "1/3" "Configuración del sistema"
+info "Puedes escribir ${BOLD}<${NC} y pulsar Enter en cualquier pregunta para volver atrás."
 
-# ── Disco ──────────────────────────────────────────────────────────────────────
-echo -e "\n${DIM}  Discos disponibles:${NC}"
-lsblk -dpno NAME,SIZE,MODEL | grep -v 'loop\|sr0' | while read -r line; do
-    echo -e "     ${CYAN}${line}${NC}"
+HISTORIAL=()
+PASO=1
+
+while true; do
+    case "$PASO" in
+        1)
+            step "1/3" "Configuración del sistema"
+            echo -e "\n${DIM}  Discos disponibles:${NC}"
+            lsblk -dpno NAME,SIZE,MODEL | grep -v 'loop\|sr0' | while read -r line; do
+                echo -e "     ${CYAN}${line}${NC}"
+            done
+            ask "Disco destino" "${DISK:-/dev/sda}" || { echo -e "  ${YELLOW}Ya estás en el primer paso.${NC}"; continue; }
+            DISK="$REPLY"
+            if [[ ! -b "$DISK" ]]; then
+                warn "El disco '$DISK' no existe."
+                continue
+            fi
+            DISK_SIZE_BYTES=$(lsblk -b -no SIZE "$DISK" | head -n1)
+            DISK_SIZE_GB=$(( DISK_SIZE_BYTES / 1024 / 1024 / 1024 ))
+            HISTORIAL+=("$PASO")
+            PASO=2
+            ;;
+        2)
+            ask_yn "¿Activar swap?" "${ACTIVATE_SWAP:-s}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ACTIVATE_SWAP="$YN"
+            HISTORIAL+=("$PASO")
+            if [[ "$ACTIVATE_SWAP" == "s" ]]; then PASO=3; else SWAP_SIZE="0"; PASO=4; fi
+            ;;
+        3)
+            ask "Tamaño de swap" "${SWAP_SIZE:-8G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            SWAP_SIZE="$REPLY"
+            validar_tamano "$SWAP_SIZE" || continue
+            
+            swap_mb=$(convertir_a_mb "$SWAP_SIZE")
+            swap_gb=$(( swap_mb / 1024 ))
+            min_required_gb=10
+            
+            if (( swap_gb >= DISK_SIZE_GB - min_required_gb )); then
+                warn "La partición de Swap de $SWAP_SIZE es demasiado grande para tu disco de $DISK_SIZE_GB GB."
+                max_swap_gb=$(( DISK_SIZE_GB - min_required_gb ))
+                if (( max_swap_gb <= 0 )); then
+                    warn "Tu disco de $DISK_SIZE_GB GB es demasiado pequeño para soportar Swap. Se desactivará automáticamente."
+                    SWAP_SIZE="0"
+                    HISTORIAL+=("$PASO")
+                    PASO=4
+                else
+                    info "Por favor, elige un tamaño de Swap menor (máximo recomendado: ${max_swap_gb}G)."
+                fi
+                continue
+            fi
+            HISTORIAL+=("$PASO")
+            PASO=4
+            ;;
+        4)
+            ask_yn "¿Crear una partición separada para /home?" "${SEPARATE_HOME:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            SEPARATE_HOME="$YN"
+            HISTORIAL+=("$PASO")
+            if [[ "$SEPARATE_HOME" == "s" ]]; then PASO=5; else ROOT_SIZE="0"; PASO=6; fi
+            ;;
+        5)
+            dim "  El espacio sobrante tras la raíz se asignará a /home automáticamente."
+            dim "  Tamaño total detectado del disco: ${DISK_SIZE_GB} GB"
+            
+            swap_gb_temp=$(( $(convertir_a_mb "$SWAP_SIZE") / 1024 ))
+            usable_gb_temp=$(( DISK_SIZE_GB - swap_gb_temp - 1 ))
+            suggested_root_gb=$(( usable_gb_temp * 60 / 100 ))
+            if (( suggested_root_gb > 40 )); then suggested_root_gb=40
+            elif (( suggested_root_gb < 10 )); then suggested_root_gb=10; fi
+            
+            if (( suggested_root_gb >= usable_gb_temp )); then
+                suggested_root_gb=$(( usable_gb_temp - 2 ))
+                if (( suggested_root_gb < 10 )); then suggested_root_gb=10; fi
+            fi
+            
+            ask "Tamaño de la partición raíz (/)" "${ROOT_SIZE:-${suggested_root_gb}G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ROOT_SIZE="$REPLY"
+            
+            validar_tamano "$ROOT_SIZE" || continue
+            
+            swap_mb=$(convertir_a_mb "$SWAP_SIZE")
+            root_mb=$(convertir_a_mb "$ROOT_SIZE")
+            efi_mb=512
+            total_req_mb=$(( swap_mb + root_mb + efi_mb ))
+            total_req_gb=$(( (total_req_mb + 1023) / 1024 ))
+            max_allowed_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 ))
+            
+            if (( root_mb < 10240 )); then
+                warn "El tamaño solicitado de raíz ($ROOT_SIZE) es inferior al mínimo recomendado (10 GB)."
+                info "Por favor, elige un tamaño de al menos 10G."
+                continue
+            elif (( total_req_gb >= DISK_SIZE_GB )); then
+                warn "Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI = $total_req_gb GB supera el disco ($DISK_SIZE_GB GB)."
+                if (( max_allowed_root_mb <= 0 )); then
+                    warn "Disco demasiado pequeño. Escribe '<' para volver atrás y reducir la Swap."
+                else
+                    info "Elige un tamaño menor para la raíz (máximo recomendado: $(( max_allowed_root_mb / 1024 ))G)."
+                fi
+                continue
+            elif (( root_mb > max_allowed_root_mb )); then
+                warn "Raíz ($ROOT_SIZE) no deja espacio útil para /home (mínimo 2 GB)."
+                info "Tamaño máximo de raíz permitido: $(( max_allowed_root_mb / 1024 ))G."
+                continue
+            fi
+            HISTORIAL+=("$PASO")
+            PASO=6
+            ;;
+        6)
+            ask "Hostname" "${HOSTNAME:-archbox}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            HOSTNAME="$REPLY"
+            HISTORIAL+=("$PASO")
+            PASO=7
+            ;;
+        7)
+            echo -e "\n${DIM}  Ejemplos: Europe/Madrid, America/New_York, Asia/Tokyo${NC}"
+            ask "Zona horaria" "${TIMEZONE:-Europe/Madrid}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            TIMEZONE="$REPLY"
+            HISTORIAL+=("$PASO")
+            PASO=8
+            ;;
+        8)
+            pick "Idioma del sistema" "es_ES.UTF-8" "en_US.UTF-8" "ca_ES.UTF-8" "fr_FR.UTF-8" "de_DE.UTF-8" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            LOCALE="$PICKED"
+            HISTORIAL+=("$PASO")
+            PASO=9
+            ;;
+        9)
+            pick "Mapa de teclado (consola)" "es" "en" "us" "fr" "de" "latam" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            KEYMAP="$PICKED"
+            HISTORIAL+=("$PASO")
+            PASO=10
+            ;;
+        10)
+            pick "Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            KERNEL="$PICKED"
+            HISTORIAL+=("$PASO")
+            PASO=11
+            ;;
+        11)
+            if $UEFI; then
+                pick "Bootloader" "grub" "systemd-boot" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            else
+                pick "Bootloader" "grub" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            fi
+            BOOTLOADER="$PICKED"
+            HISTORIAL+=("$PASO")
+            PASO=12
+            ;;
+        12)
+            step "2/3" "Usuario y contraseñas"
+            ask "Nombre de usuario" "${USERNAME:-user}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            USERNAME="$REPLY"
+            HISTORIAL+=("$PASO")
+            PASO=13
+            ;;
+        13)
+            ask_pass "Contraseña para root" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ROOT_PASSWORD="$PASS"
+            HISTORIAL+=("$PASO")
+            PASO=14
+            ;;
+        14)
+            ask_pass "Contraseña para $USERNAME" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            USER_PASSWORD="$PASS"
+            HISTORIAL+=("$PASO")
+            PASO=15
+            ;;
+        15)
+            step "3/3" "Extras (opcionales)"
+            pick "AUR helper" "paru" "yay" "ninguno" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            AUR_HELPER="$PICKED"
+            [[ "$AUR_HELPER" == "ninguno" ]] && AUR_HELPER=""
+            HISTORIAL+=("$PASO")
+            PASO=16
+            ;;
+        16)
+            ask_yn "¿Instalar dotfiles desde un repositorio git?" "${INSTALL_DOTFILES:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            INSTALL_DOTFILES="$YN"
+            HISTORIAL+=("$PASO")
+            if [[ "$INSTALL_DOTFILES" == "s" ]]; then PASO=17; else DOTFILES_REPO=""; DOTFILES_SCRIPT="install.sh"; PASO=19; fi
+            ;;
+        17)
+            ask "URL del repositorio" "${DOTFILES_REPO:-}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            DOTFILES_REPO="$REPLY"
+            HISTORIAL+=("$PASO")
+            PASO=18
+            ;;
+        18)
+            ask "Script de instalación dentro del repo" "${DOTFILES_SCRIPT:-install.sh}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            DOTFILES_SCRIPT="$REPLY"
+            HISTORIAL+=("$PASO")
+            PASO=19
+            ;;
+        19)
+            ask_yn "¿Habilitar SSH?" "${ENABLE_SSH:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ENABLE_SSH="$YN"
+            break # Terminamos la fase 1 exitosamente
+            ;;
+    esac
 done
-ask "Disco destino" "/dev/sda"
-DISK="$REPLY"
-[[ -b "$DISK" ]] || error "El disco '$DISK' no existe."
-
-DISK_SIZE_BYTES=$(lsblk -b -no SIZE "$DISK" | head -n1)
-DISK_SIZE_GB=$(( DISK_SIZE_BYTES / 1024 / 1024 / 1024 ))
-
-ask_yn "¿Activar swap?" "s"
-if [[ "$YN" == "s" ]]; then
-    while true; do
-        ask "Tamaño de swap" "8G"
-        SWAP_SIZE="$REPLY"
-        
-        # Paso 1: Validar formato (debe terminar en G o M)
-        validar_tamano "$SWAP_SIZE" || continue
-        
-        # Paso 2: Validar si el tamaño de swap es coherente con la capacidad del disco
-        swap_mb=$(convertir_a_mb "$SWAP_SIZE")
-        swap_gb=$(( swap_mb / 1024 ))
-        
-        # Necesitamos al menos 10GB libres en el disco para una instalación funcional básica
-        min_required_gb=10
-        if (( swap_gb >= DISK_SIZE_GB - min_required_gb )); then
-            warn "La partición de Swap de $SWAP_SIZE es demasiado grande para tu disco de $DISK_SIZE_GB GB."
-            max_swap_gb=$(( DISK_SIZE_GB - min_required_gb ))
-            if (( max_swap_gb <= 0 )); then
-                warn "Tu disco de $DISK_SIZE_GB GB es demasiado pequeño para soportar Swap. Se desactivará automáticamente."
-                SWAP_SIZE="0"
-                break
-            else
-                info "Por favor, elige un tamaño de Swap menor (máximo recomendado para este disco: ${max_swap_gb}G)."
-            fi
-        else
-            break
-        fi
-    done
-else
-    SWAP_SIZE="0"
-fi
-
-ask_yn "¿Crear una partición separada para /home?" "n"
-SEPARATE_HOME="$YN"
-ROOT_SIZE="0"
-if [[ "$SEPARATE_HOME" == "s" ]]; then
-    dim "  El espacio sobrante tras la raíz se asignará a /home automáticamente."
-    dim "  Tamaño total detectado del disco: ${DISK_SIZE_GB} GB"
-    
-    # Calcular tamaño sugerido de raíz dinámicamente (60% del espacio útil, máx 40G, mín 10G)
-    swap_gb_temp=$(( $(convertir_a_mb "$SWAP_SIZE") / 1024 ))
-    usable_gb_temp=$(( DISK_SIZE_GB - swap_gb_temp - 1 ))
-    suggested_root_gb=$(( usable_gb_temp * 60 / 100 ))
-    if (( suggested_root_gb > 40 )); then
-        suggested_root_gb=40
-    elif (( suggested_root_gb < 10 )); then
-        suggested_root_gb=10
-    fi
-    
-    # Ajuste fino si el espacio útil es crítico
-    if (( suggested_root_gb >= usable_gb_temp )); then
-        suggested_root_gb=$(( usable_gb_temp - 2 )) # Reservamos al menos 2GB para /home
-        if (( suggested_root_gb < 10 )); then
-            suggested_root_gb=10 # Mínimo absoluto para que Arch sea usable
-        fi
-    fi
-    
-    while true; do
-        ask "Tamaño de la partición raíz (/)" "${suggested_root_gb}G"
-        ROOT_SIZE="$REPLY"
-        
-        # Paso 1: Validar formato (debe terminar en G o M)
-        validar_tamano "$ROOT_SIZE" || continue
-        
-        # Paso 2: Validar si los tamaños solicitados caben físicamente en el disco
-        swap_mb=$(convertir_a_mb "$SWAP_SIZE")
-        root_mb=$(convertir_a_mb "$ROOT_SIZE")
-        efi_mb=512
-        total_req_mb=$(( swap_mb + root_mb + efi_mb ))
-        total_req_gb=$(( (total_req_mb + 1023) / 1024 )) # Redondeo hacia arriba en GB
-        
-        # Límite máximo para dejar al menos 2 GB a la partición /home
-        max_allowed_root_mb=$(( (DISK_SIZE_GB * 1024) - swap_mb - efi_mb - 2048 ))
-        
-        if (( root_mb < 10240 )); then
-            warn "El tamaño solicitado de raíz ($ROOT_SIZE) es inferior al mínimo recomendado para que Arch sea funcional (10 GB)."
-            info "Por favor, elige un tamaño de al menos 10G."
-        elif (( total_req_gb >= DISK_SIZE_GB )); then
-            warn "El tamaño solicitado para Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI ($efi_mb MB) = $total_req_gb GB supera el tamaño real del disco ($DISK_SIZE_GB GB)."
-            if (( max_allowed_root_mb <= 0 )); then
-                error "El disco de $DISK_SIZE_GB GB es demasiado pequeño para la Swap configurada ($SWAP_SIZE) y una partición /home. Reduce la Swap."
-            else
-                info "Por favor, elige un tamaño menor para la raíz (máximo recomendado: $(( max_allowed_root_mb / 1024 ))G para dejar espacio a /home)."
-            fi
-        elif (( root_mb > max_allowed_root_mb )); then
-            warn "El tamaño de Raíz ($ROOT_SIZE) no deja espacio útil suficiente para la partición /home (deben quedar libres al menos 2 GB)."
-            info "Para permitir separar /home en este disco, el tamaño máximo de la raíz es de $(( max_allowed_root_mb / 1024 ))G."
-        else
-            break
-        fi
-    done
-fi
-
-# ── Sistema ────────────────────────────────────────────────────────────────────
-ask "Hostname" "archbox"
-HOSTNAME="$REPLY"
-
-echo -e "\n${DIM}  Ejemplos: Europe/Madrid, America/New_York, Asia/Tokyo${NC}"
-ask "Zona horaria" "Europe/Madrid"
-TIMEZONE="$REPLY"
-
-pick "Idioma del sistema" "es_ES.UTF-8" "en_US.UTF-8" "ca_ES.UTF-8" "fr_FR.UTF-8" "de_DE.UTF-8"
-LOCALE="$PICKED"
-
-pick "Mapa de teclado (consola)" "es" "en" "us" "fr" "de" "latam"
-KEYMAP="$PICKED"
-
-pick "Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened"
-KERNEL="$PICKED"
-
-if $UEFI; then
-    pick "Bootloader" "grub" "systemd-boot"
-else
-    pick "Bootloader" "grub"
-fi
-BOOTLOADER="$PICKED"
-
-step "2/3" "Usuario y contraseñas"
-
-ask "Nombre de usuario" "user"
-USERNAME="$REPLY"
-
-ask_pass "Contraseña para root"
-ROOT_PASSWORD="$PASS"
-
-ask_pass "Contraseña para $USERNAME"
-USER_PASSWORD="$PASS"
-
-step "3/3" "Extras (opcionales)"
-
-pick "AUR helper" "paru" "yay" "ninguno"
-AUR_HELPER="$PICKED"
-[[ "$AUR_HELPER" == "ninguno" ]] && AUR_HELPER=""
-
-ask_yn "¿Instalar dotfiles desde un repositorio git?" "n"
-DOTFILES_REPO=""
-DOTFILES_SCRIPT="install.sh"
-if [[ "$YN" == "s" ]]; then
-    ask "URL del repositorio" ""
-    DOTFILES_REPO="$REPLY"
-    ask "Script de instalación dentro del repo" "install.sh"
-    DOTFILES_SCRIPT="$REPLY"
-fi
-
-ask_yn "¿Habilitar SSH?" "n"
-ENABLE_SSH="$YN"
 
 # ── Resumen ────────────────────────────────────────────────────────────────────
 clear

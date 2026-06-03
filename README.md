@@ -33,6 +33,9 @@ El script te preguntará:
 
 Tras confirmar, **corre solo**. En 5–10 min tienes Arch instalado (dependiendo de la velocidad de tu internet).
 
+### Corrección de Errores (Deshacer)
+Si durante la fase de preguntas te equivocas en alguna opción, ¡no necesitas cancelar el script! Simplemente **escribe `<` y pulsa Enter** en cualquier pregunta para volver al paso anterior de forma segura.
+
 ---
 
 ## WiFi desde la ISO
