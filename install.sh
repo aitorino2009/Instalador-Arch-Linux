@@ -337,32 +337,44 @@ while true; do
             PASO=15
             ;;
         15)
-            step "3/3" "Extras (opcionales)"
-            pick "AUR helper" "paru" "yay" "ninguno" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
-            AUR_HELPER="$PICKED"
-            [[ "$AUR_HELPER" == "ninguno" ]] && AUR_HELPER=""
+            step "3/3" "Entorno Gráfico y Extras"
+            pick "Driver de Vídeo" "Intel" "AMD" "NVIDIA" "VirtualBox/VMware" "Ninguno (Servidor)" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            VIDEO_DRIVER="$PICKED"
             HISTORIAL+=("$PASO")
             PASO=16
             ;;
         16)
-            ask_yn "¿Instalar dotfiles desde un repositorio git?" "${INSTALL_DOTFILES:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
-            INSTALL_DOTFILES="$YN"
+            pick "Entorno de Escritorio" "GNOME" "KDE Plasma" "XFCE" "Hyprland (Wayland)" "i3-wm (X11)" "Ninguno" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            DESKTOP_ENV="$PICKED"
             HISTORIAL+=("$PASO")
-            if [[ "$INSTALL_DOTFILES" == "s" ]]; then PASO=17; else DOTFILES_REPO=""; DOTFILES_SCRIPT="install.sh"; PASO=19; fi
+            PASO=17
             ;;
         17)
-            ask "URL del repositorio" "${DOTFILES_REPO:-}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
-            DOTFILES_REPO="$REPLY"
+            pick "AUR helper" "paru" "yay" "ninguno" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            AUR_HELPER="$PICKED"
+            [[ "$AUR_HELPER" == "ninguno" ]] && AUR_HELPER=""
             HISTORIAL+=("$PASO")
             PASO=18
             ;;
         18)
+            ask_yn "¿Instalar dotfiles desde un repositorio git?" "${INSTALL_DOTFILES:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            INSTALL_DOTFILES="$YN"
+            HISTORIAL+=("$PASO")
+            if [[ "$INSTALL_DOTFILES" == "s" ]]; then PASO=19; else DOTFILES_REPO=""; DOTFILES_SCRIPT="install.sh"; PASO=21; fi
+            ;;
+        19)
+            ask "URL del repositorio" "${DOTFILES_REPO:-}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            DOTFILES_REPO="$REPLY"
+            HISTORIAL+=("$PASO")
+            PASO=20
+            ;;
+        20)
             ask "Script de instalación dentro del repo" "${DOTFILES_SCRIPT:-install.sh}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             DOTFILES_SCRIPT="$REPLY"
             HISTORIAL+=("$PASO")
-            PASO=19
+            PASO=21
             ;;
-        19)
+        21)
             ask_yn "¿Habilitar SSH?" "${ENABLE_SSH:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             ENABLE_SSH="$YN"
             break # Terminamos la fase 1 exitosamente
@@ -395,6 +407,7 @@ echo -e "  ${DIM}Locale:${NC}      $LOCALE   teclado: $KEYMAP"
 echo -e "  ${DIM}Kernel:${NC}      $KERNEL"
 echo -e "  ${DIM}Bootloader:${NC}  $BOOTLOADER   $( $UEFI && echo '[UEFI]' || echo '[BIOS]' )"
 echo -e "  ${DIM}Usuario:${NC}     $USERNAME"
+echo -e "  ${DIM}Gráficos:${NC}    $VIDEO_DRIVER / $DESKTOP_ENV"
 echo -e "  ${DIM}AUR helper:${NC}  $( [[ -n "$AUR_HELPER" ]] && echo "$AUR_HELPER" || echo "ninguno" )"
 echo -e "  ${DIM}SSH:${NC}         $( [[ "$ENABLE_SSH" == "s" ]] && echo "habilitado" || echo "deshabilitado" )"
 [[ -n "$DOTFILES_REPO" ]] && echo -e "  ${DIM}Dotfiles:${NC}    $DOTFILES_REPO"
@@ -616,10 +629,26 @@ step "·" "Instalando sistema base (esto tarda un poco)"
 EXTRA_PKGS=""
 [[ "$FS" == "btrfs" ]] && EXTRA_PKGS="btrfs-progs"
 
+GUI_PKGS=""
+DM_SERVICE=""
+if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servidor)}" != "Ninguno (Servidor)" ]]; then
+    GUI_PKGS="xorg-server xorg-xinit mesa"
+    if [[ "$VIDEO_DRIVER" == *"Intel"* ]]; then GUI_PKGS+=" xf86-video-intel vulkan-intel";
+    elif [[ "$VIDEO_DRIVER" == *"AMD"* ]]; then GUI_PKGS+=" xf86-video-amdgpu vulkan-radeon";
+    elif [[ "$VIDEO_DRIVER" == *"NVIDIA"* ]]; then GUI_PKGS+=" nvidia nvidia-utils";
+    elif [[ "$VIDEO_DRIVER" == *"VMware"* ]]; then GUI_PKGS+=" xf86-video-vmware virtualbox-guest-utils"; fi
+
+    if [[ "$DESKTOP_ENV" == *"GNOME"* ]]; then GUI_PKGS+=" gnome gnome-tweaks gdm"; DM_SERVICE="gdm";
+    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"XFCE"* ]]; then GUI_PKGS+=" xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
+    elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"i3"* ]]; then GUI_PKGS+=" i3-wm i3status i3lock dmenu alacritty lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm"; fi
+fi
+
 pacstrap -K /mnt \
     base "$KERNEL" "${KERNEL}-headers" linux-firmware base-devel \
     "$MICROCODE" \
-    networkmanager git nvim vim sudo curl wget reflector cryptsetup $EXTRA_PKGS \
+    networkmanager git nvim vim sudo curl wget reflector cryptsetup $EXTRA_PKGS $GUI_PKGS \
     man-db man-pages bash-completion htop openssh \
     grub efibootmgr os-prober
 log "Sistema base instalado."
@@ -662,6 +691,7 @@ PART_HOME="${PART_HOME:-}"
 PART_SWAP="${PART_SWAP:-}"
 LUKS="${LUKS:-n}"
 FS="$FS"
+DM_SERVICE="$DM_SERVICE"
 AUR_HELPER="$AUR_HELPER"
 DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
@@ -694,6 +724,9 @@ sed -i 's/^#ParallelDownloads/ParallelDownloads/'  /etc/pacman.conf
 
 # Red
 systemctl enable NetworkManager
+
+# Display Manager
+[[ -n "\$DM_SERVICE" ]] && systemctl enable "\$DM_SERVICE"
 
 # SSH
 [[ "\$ENABLE_SSH" == "s" ]] && systemctl enable sshd
