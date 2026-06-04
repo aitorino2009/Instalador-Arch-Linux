@@ -198,7 +198,7 @@ while true; do
             PASO="3_fs"
             ;;
         "3_fs")
-            pick "Sistema de archivos" "ext4 (Clásico, estable)" "btrfs (Moderno, subvolúmenes, snapshots)" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            pick "Sistema de archivos:" "ext4 (Clásico, estable)" "btrfs (Moderno, subvolúmenes, snapshots)" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             if [[ "$PICKED" == *"ext4"* ]]; then FS="ext4";
             elif [[ "$PICKED" == *"btrfs"* ]]; then FS="btrfs";
             fi
@@ -661,6 +661,7 @@ PART_ROOT="$PART_ROOT"
 PART_HOME="${PART_HOME:-}"
 PART_SWAP="${PART_SWAP:-}"
 LUKS="${LUKS:-n}"
+FS="$FS"
 AUR_HELPER="$AUR_HELPER"
 DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
@@ -745,6 +746,9 @@ EOF
     else
         ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
         ROOT_OPT="root=PARTUUID=\${ROOT_UUID} rw quiet"
+    fi
+    if [[ "\$FS" == "btrfs" ]]; then
+        ROOT_OPT="\${ROOT_OPT} rootflags=subvol=@"
     fi
     cat > \${ESP_DIR}/loader/entries/arch.conf <<EOF
 title   Arch Linux
