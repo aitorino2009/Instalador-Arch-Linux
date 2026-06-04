@@ -15,6 +15,7 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 3. **Seguridad y Confirmación:** Al tratarse de un script que altera particiones de discos y formatea sistemas de archivos, cualquier modificación sobre la lógica de escritura en disco debe ser analizada minuciosamente y requerirá confirmación explícita antes de cualquier test destructivo.
 4. **Resiliencia Base:** El sistema base debe quedar 100% intacto y funcional aunque los módulos extras (como AUR helper o dotfiles) fallen. El script debe reportar el error pero continuar sin colapsar.
 5. **Nombrado de Archivos en Castellano:** Cualquier archivo nuevo creado en el repositorio (especificaciones, habilidades, planes, etc.) debe tener obligatoriamente su nombre de archivo escrito en castellano (ej. `particionado_personalizado.md` en lugar de `custom_partitioning.md`).
+6. **Paciencia y Protocolo (Quien mucho abarca poco aprieta):** Nunca agrupes múltiples fases en una sola respuesta. El flujo de desarrollo es estricto y secuencial: Idea → Plan de Implementación → Spec Maestra en `.agent/specs/` → Skill de pruebas en `.agent/skills/` → Aplicación de código en `install.sh`. Debes esperar al _feedback_ o validación del usuario al final de cada paso antes de iniciar el siguiente.
 
 ---
 
@@ -55,5 +56,5 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 Si deseas expandir el proyecto, aquí hay ideas altamente recomendadas que se pueden abordar en las siguientes sesiones:
 * [x] **Soporte para BTRFS:** Añadida la opción de formatear en BTRFS con soporte de subvolúmenes (`@`, `@home`, `@pkg`, `@log`, `@snapshots`) y compresión `zstd`. Se integra limpiamente con LUKS y la máquina de estados. Implementación exitosa en `install.sh`.
 * [x] **Cifrado de Disco (LUKS):** Implementado cifrado completo de disco con LUKS (LUKS2 con Argon2id por defecto, fallback a LUKS1 para GRUB). Implementación exitosa en `install.sh`.
-* [ ] **Instalación de Entornos de Escritorio (DE):** Menú interactivo opcional para instalar entornos de escritorio (GNOME, KDE Plasma, XFCE) o gestores de ventanas (i3, Hyprland) con sus correspondientes drivers gráficos.
+* [x] **Instalación de Entornos de Escritorio (DE):** Menú interactivo integrado que incluye instalación de drivers de vídeo base, Display Managers (`gdm`, `sddm`, `lightdm`), entornos completos (GNOME, KDE Plasma, XFCE) y WMs pelados para configurar por dotfiles (Hyprland, i3). Implementación exitosa en `install.sh`.
 * [x] **Esquema de Particionado Personalizado:** Implementado. Rama `particionado_personalizado` lista para merge.
