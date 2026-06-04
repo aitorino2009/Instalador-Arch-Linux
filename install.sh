@@ -198,12 +198,10 @@ while true; do
             PASO="3_fs"
             ;;
         "3_fs")
-            echo -e "\n${DIM}  1) ext4 (Clásico, estable)"
-            echo -e "  2) btrfs (Moderno, subvolúmenes, snapshots)${NC}"
-            ask "Sistema de archivos (1 o 2)" "${FS_CHOICE:-1}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
-            if [[ "$REPLY" == "1" ]]; then FS="ext4"; FS_CHOICE="1";
-            elif [[ "$REPLY" == "2" ]]; then FS="btrfs"; FS_CHOICE="2";
-            else warn "Opción no válida."; continue; fi
+            pick "Sistema de archivos" "ext4 (Clásico, estable)" "btrfs (Moderno, subvolúmenes, snapshots)" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            if [[ "$PICKED" == *"ext4"* ]]; then FS="ext4";
+            elif [[ "$PICKED" == *"btrfs"* ]]; then FS="btrfs";
+            fi
             HISTORIAL+=("$PASO")
             if [[ "$FS" == "btrfs" ]]; then
                 # BTRFS no necesita separar la home físicamente, usamos subvolúmenes
