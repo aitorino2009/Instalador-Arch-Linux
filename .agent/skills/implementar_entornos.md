@@ -48,6 +48,8 @@ mkdir -p /tmp/fake-chroot/usr/lib/systemd/system
 touch /tmp/fake-chroot/usr/lib/systemd/system/gdm.service
 touch /tmp/fake-chroot/usr/lib/systemd/system/sddm.service
 touch /tmp/fake-chroot/usr/lib/systemd/system/lightdm.service
+touch /tmp/fake-chroot/usr/lib/systemd/system/vboxservice.service
+touch /tmp/fake-chroot/usr/lib/systemd/system/vmtoolsd.service
 ```
 
 ### 2.2 Ejecutar la lógica de enlace
@@ -56,15 +58,13 @@ touch /tmp/fake-chroot/usr/lib/systemd/system/lightdm.service
 chroot /tmp/fake-chroot /bin/bash
 
 # --- DENTRO DEL CHROOT ---
-DM_SERVICE="sddm"
+DM_SERVICE="sddm"       # Ejemplo: KDE Plasma
+VM_SERVICE="vboxservice" # Ejemplo: VirtualBox
 
-if [[ -n "$DM_SERVICE" ]]; then
-    # systemctl en un chroot sin systemd corriendo a veces se queja, 
-    # pero el comando enable funciona offline desde systemd 232+
-    systemctl enable "$DM_SERVICE"
-fi
+[[ -n "$DM_SERVICE" ]] && systemctl enable "$DM_SERVICE"
+[[ -n "$VM_SERVICE" ]] && systemctl enable "$VM_SERVICE"
 
-# Verificar que el enlace simbólico default.target o display-manager.service se creó
+# Verificar que el enlace simbólico display-manager.service se creó
 ls -l /etc/systemd/system/display-manager.service
 # Debería apuntar a /usr/lib/systemd/system/sddm.service
 exit

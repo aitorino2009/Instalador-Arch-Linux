@@ -338,7 +338,7 @@ while true; do
             ;;
         15)
             step "3/3" "Entorno Gráfico y Extras"
-            pick "Driver de Vídeo" "Intel" "AMD" "NVIDIA" "VirtualBox/VMware" "Ninguno (Servidor)" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            pick "Driver de Vídeo" "Intel" "AMD" "NVIDIA" "VirtualBox" "VMware" "Ninguno (Servidor)" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             VIDEO_DRIVER="$PICKED"
             HISTORIAL+=("$PASO")
             PASO=16
@@ -631,12 +631,15 @@ EXTRA_PKGS=""
 
 GUI_PKGS=""
 DM_SERVICE=""
+VM_SERVICE=""
 if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servidor)}" != "Ninguno (Servidor)" ]]; then
     GUI_PKGS="xorg-server xorg-xinit mesa"
-    if [[ "$VIDEO_DRIVER" == *"Intel"* ]]; then GUI_PKGS+=" xf86-video-intel vulkan-intel";
+    # Drivers: Intel usa modesetting (built-in en Xorg) + vulkan; AMD/NVIDIA tienen paquetes propios
+    if [[ "$VIDEO_DRIVER" == *"Intel"* ]]; then GUI_PKGS+=" vulkan-intel intel-media-driver";
     elif [[ "$VIDEO_DRIVER" == *"AMD"* ]]; then GUI_PKGS+=" xf86-video-amdgpu vulkan-radeon";
     elif [[ "$VIDEO_DRIVER" == *"NVIDIA"* ]]; then GUI_PKGS+=" nvidia nvidia-utils";
-    elif [[ "$VIDEO_DRIVER" == *"VMware"* ]]; then GUI_PKGS+=" xf86-video-vmware virtualbox-guest-utils"; fi
+    elif [[ "$VIDEO_DRIVER" == "VirtualBox" ]]; then GUI_PKGS+=" virtualbox-guest-utils"; VM_SERVICE="vboxservice";
+    elif [[ "$VIDEO_DRIVER" == "VMware" ]]; then GUI_PKGS+=" open-vm-tools"; VM_SERVICE="vmtoolsd"; fi
 
     if [[ "$DESKTOP_ENV" == *"GNOME"* ]]; then GUI_PKGS+=" gnome gnome-tweaks gdm"; DM_SERVICE="gdm";
     elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm"; DM_SERVICE="sddm";
@@ -692,6 +695,7 @@ PART_SWAP="${PART_SWAP:-}"
 LUKS="${LUKS:-n}"
 FS="$FS"
 DM_SERVICE="$DM_SERVICE"
+VM_SERVICE="$VM_SERVICE"
 AUR_HELPER="$AUR_HELPER"
 DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
@@ -727,6 +731,9 @@ systemctl enable NetworkManager
 
 # Display Manager
 [[ -n "\$DM_SERVICE" ]] && systemctl enable "\$DM_SERVICE"
+
+# Servicios de Máquina Virtual (VirtualBox / VMware)
+[[ -n "\$VM_SERVICE" ]] && systemctl enable "\$VM_SERVICE"
 
 # SSH
 [[ "\$ENABLE_SSH" == "s" ]] && systemctl enable sshd
