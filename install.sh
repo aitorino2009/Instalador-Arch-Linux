@@ -185,7 +185,7 @@ while true; do
             ask_yn "¿Cifrar el disco con LUKS?" "${LUKS:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             LUKS="$YN"
             HISTORIAL+=("$PASO")
-            if [[ "$LUKS" == "s" ]]; then PASO="3_luks_pass"; else LUKS_PASS=""; PASO=4; fi
+            if [[ "$LUKS" == "s" ]]; then PASO="3_luks_pass"; else LUKS_PASS=""; PASO="3_fs"; fi
             ;;
         "3_luks_pass")
             ask_pass "Contraseña de cifrado LUKS" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
@@ -195,7 +195,24 @@ while true; do
             read -r CONFIRM_LUKS
             if [[ "$CONFIRM_LUKS" != "si" ]]; then LUKS_PASS=""; continue; fi
             HISTORIAL+=("$PASO")
-            PASO=4
+            PASO="3_fs"
+            ;;
+        "3_fs")
+            echo -e "\n${DIM}  1) ext4 (Clásico, estable)"
+            echo -e "  2) btrfs (Moderno, subvolúmenes, snapshots)${NC}"
+            ask "Sistema de archivos (1 o 2)" "${FS_CHOICE:-1}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            if [[ "$REPLY" == "1" ]]; then FS="ext4"; FS_CHOICE="1";
+            elif [[ "$REPLY" == "2" ]]; then FS="btrfs"; FS_CHOICE="2";
+            else warn "Opción no válida."; continue; fi
+            HISTORIAL+=("$PASO")
+            if [[ "$FS" == "btrfs" ]]; then
+                # BTRFS no necesita separar la home físicamente, usamos subvolúmenes
+                SEPARATE_HOME="n"
+                ROOT_SIZE="0"
+                PASO=6
+            else
+                PASO=4
+            fi
             ;;
         4)
             ask_yn "¿Crear una partición separada para /home?" "${SEPARATE_HOME:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
@@ -363,10 +380,15 @@ echo -e "${BOLD}${BLUE}╚══════════════════
 echo -e "  ${DIM}Disco:${NC}       ${BOLD}$DISK${NC}   ${RED}(se borrará todo el contenido)${NC}"
 echo -e "  ${DIM}Swap:${NC}        $( [[ "$SWAP_SIZE" == "0" ]] && echo "desactivada" || echo "$SWAP_SIZE" )"
 echo -e "  ${DIM}Cifrado LUKS:${NC} $( [[ "${LUKS:-n}" == "s" ]] && echo -e "${GREEN}activado${NC}" || echo "desactivado" )"
-if [[ "$SEPARATE_HOME" == "s" ]]; then
+if [[ "$FS" == "btrfs" ]]; then
+    echo -e "  ${DIM}Sistema arch.:${NC}${CYAN} btrfs ${NC}${DIM}(con subvolúmenes @, @home...)${NC}"
+    echo -e "  ${DIM}Raíz (/):${NC}    todo el disco"
+elif [[ "$SEPARATE_HOME" == "s" ]]; then
+    echo -e "  ${DIM}Sistema arch.:${NC} ext4"
     echo -e "  ${DIM}Raíz (/):${NC}    $ROOT_SIZE"
     echo -e "  ${DIM}Home (/home):${NC}${GREEN} separada ${NC}${DIM}(resto del disco)${NC}"
 else
+    echo -e "  ${DIM}Sistema arch.:${NC} ext4"
     echo -e "  ${DIM}Raíz (/):${NC}    todo el disco  ${DIM}(sin /home separado)${NC}"
 fi
 echo -e "  ${DIM}Hostname:${NC}    $HOSTNAME"
@@ -489,11 +511,12 @@ partprobe "$DISK" 2>/dev/null || true
 sleep 2
 log "Particionado completo."
 
-# ── Formato ────────────────────────────────────────────────────────────────────
+# ── Formato y Montaje de Raíz ──────────────────────────────────────────────────
 step "·" "Formateando particiones"
 sleep 1
 $UEFI && { info "FAT32 → $PART_EFI"; mkfs.fat -F32 -n "EFI" "$PART_EFI"; }
 
+_TARGET_ROOT="$PART_ROOT"
 if [[ "${LUKS:-n}" == "s" ]]; then
     info "luksFormat → $PART_ROOT"
     if [[ "$BOOTLOADER" == "grub" ]]; then
@@ -503,54 +526,57 @@ if [[ "${LUKS:-n}" == "s" ]]; then
     fi
     info "luksOpen → cryptroot"
     echo -n "$LUKS_PASS" | cryptsetup open "$PART_ROOT" cryptroot -
-    
-    info "ext4 → /dev/mapper/cryptroot"
-    mkfs.ext4 -L "root" -F /dev/mapper/cryptroot
-    
-    if [[ -n "$PART_HOME" ]]; then
-        info "luksFormat → $PART_HOME"
-        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_HOME" -
-        info "luksOpen → crypthome"
-        echo -n "$LUKS_PASS" | cryptsetup open "$PART_HOME" crypthome -
-        
-        info "ext4 → /dev/mapper/crypthome"
-        mkfs.ext4 -L "home" -F /dev/mapper/crypthome
-    fi
-    
-    if [[ -n "$PART_SWAP" ]]; then
-        info "swap → $PART_SWAP"
-        mkswap -L "swap" "$PART_SWAP"
-        swapon "$PART_SWAP"
-    fi
-else
-    if [[ -n "$PART_SWAP" ]]; then
-        info "swap → $PART_SWAP"
-        mkswap -L "swap" "$PART_SWAP"
-        swapon "$PART_SWAP"
-    fi
-    info "ext4 → $PART_ROOT"
-    mkfs.ext4 -L "root" -F "$PART_ROOT"
-    if [[ -n "$PART_HOME" ]]; then
-        info "ext4 → $PART_HOME"
-        mkfs.ext4 -L "home" -F "$PART_HOME"
-    fi
+    _TARGET_ROOT="/dev/mapper/cryptroot"
 fi
-log "Formato completo."
 
-# ── Montaje ────────────────────────────────────────────────────────────────────
-if [[ "${LUKS:-n}" == "s" ]]; then
-    mount /dev/mapper/cryptroot /mnt
-    if [[ -n "$PART_HOME" ]]; then
-        mkdir -p /mnt/home
-        mount /dev/mapper/crypthome /mnt/home
-    fi
+if [[ -n "$PART_SWAP" ]]; then
+    info "swap → $PART_SWAP"
+    mkswap -L "swap" "$PART_SWAP"
+    swapon "$PART_SWAP"
+fi
+
+if [[ "$FS" == "btrfs" ]]; then
+    info "btrfs → $_TARGET_ROOT"
+    mkfs.btrfs -L "arch" -f "$_TARGET_ROOT"
+    
+    info "Creando subvolúmenes BTRFS (@, @home, @pkg, @log, @snapshots)"
+    mount "$_TARGET_ROOT" /mnt
+    btrfs subvolume create /mnt/@ >/dev/null
+    btrfs subvolume create /mnt/@home >/dev/null
+    btrfs subvolume create /mnt/@pkg >/dev/null
+    btrfs subvolume create /mnt/@log >/dev/null
+    btrfs subvolume create /mnt/@snapshots >/dev/null
+    umount /mnt
+    
+    info "Montando subvolúmenes con compresión zstd"
+    mount -o noatime,compress=zstd,space_cache=v2,discard=async,subvol=@ "$_TARGET_ROOT" /mnt
+    mkdir -p /mnt/{home,var/cache/pacman/pkg,var/log,.snapshots}
+    mount -o noatime,compress=zstd,space_cache=v2,discard=async,subvol=@home "$_TARGET_ROOT" /mnt/home
+    mount -o noatime,compress=zstd,space_cache=v2,discard=async,subvol=@pkg "$_TARGET_ROOT" /mnt/var/cache/pacman/pkg
+    mount -o noatime,compress=zstd,space_cache=v2,discard=async,subvol=@log "$_TARGET_ROOT" /mnt/var/log
+    mount -o noatime,compress=zstd,space_cache=v2,discard=async,subvol=@snapshots "$_TARGET_ROOT" /mnt/.snapshots
 else
-    mount "$PART_ROOT" /mnt
+    info "ext4 → $_TARGET_ROOT"
+    mkfs.ext4 -L "root" -F "$_TARGET_ROOT"
+    mount "$_TARGET_ROOT" /mnt
+    
     if [[ -n "$PART_HOME" ]]; then
+        if [[ "${LUKS:-n}" == "s" ]]; then
+            info "luksFormat → $PART_HOME"
+            echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_HOME" -
+            info "luksOpen → crypthome"
+            echo -n "$LUKS_PASS" | cryptsetup open "$PART_HOME" crypthome -
+            _TARGET_HOME="/dev/mapper/crypthome"
+        else
+            _TARGET_HOME="$PART_HOME"
+        fi
+        info "ext4 → $_TARGET_HOME"
+        mkfs.ext4 -L "home" -F "$_TARGET_HOME"
         mkdir -p /mnt/home
-        mount "$PART_HOME" /mnt/home
+        mount "$_TARGET_HOME" /mnt/home
     fi
 fi
+log "Formato y montaje de raíz completo."
 if $UEFI; then
     if [[ "$BOOTLOADER" == "systemd-boot" ]]; then
         ESP_DIR="/boot"
@@ -588,10 +614,14 @@ info "Microcode detectado: $MICROCODE"
 
 # ── pacstrap ───────────────────────────────────────────────────────────────────
 step "·" "Instalando sistema base (esto tarda un poco)"
+
+EXTRA_PKGS=""
+[[ "$FS" == "btrfs" ]] && EXTRA_PKGS="btrfs-progs"
+
 pacstrap -K /mnt \
     base "$KERNEL" "${KERNEL}-headers" linux-firmware base-devel \
     "$MICROCODE" \
-    networkmanager git nvim vim sudo curl wget reflector cryptsetup \
+    networkmanager git nvim vim sudo curl wget reflector cryptsetup $EXTRA_PKGS \
     man-db man-pages bash-completion htop openssh \
     grub efibootmgr os-prober
 log "Sistema base instalado."

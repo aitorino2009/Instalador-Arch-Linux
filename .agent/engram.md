@@ -38,7 +38,7 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 * **⚠️ BUG CRÍTICO — systemd-boot inarrancable en partición ext4/LUKS:** `systemd-boot` solo puede leer kernels desde particiones FAT32 (la ESP). Si montamos la ESP en `/boot/efi` y la raíz en `/dev/mapper/cryptroot`, `pacstrap` deja el kernel en la raíz cifrada y `systemd-boot` no puede cargarlo, mostrando una pantalla vacía. La solución implementada es asignar dinámicamente el punto de montaje de la ESP a `/boot` si el gestor elegido es `systemd-boot` (asegurando que kernel y microcode acaban en FAT32) y dejarlo en `/boot/efi` para GRUB.
 * **⚠️ BUG — Aviso de seguridad "random seed world accessible" en systemd-boot:** Por defecto, vfat monta el ESP con lectura para todos. Añadir la opción `umask=0077` en el comando `mount` durante el formateo/montaje en Fase 2 soluciona este problema e inyecta la opción en `/etc/fstab` automáticamente a través de `genfstab`.
 
-* **Spec de Cifrado LUKS:** Especificación técnica completa escrita en `.agent/specs/cifrado_luks.md`. Cubre la estrategia de cifrado de root y home con LUKS2 (systemd-boot) y LUKS1 (GRUB por compatibilidad), la integración en la Máquina de Estados de Fase 1, los hooks de mkinitcpio, los parámetros de kernel para ambos bootloaders y la gestión de swap cifrada efímera vía `/etc/crypttab`. Pendiente de implementación en `install.sh`.
+* **Spec de Cifrado LUKS:** Especificación técnica completa escrita en `.agent/specs/cifrado_luks.md`. Cubre la estrategia de cifrado de root y home con LUKS2 (systemd-boot) y LUKS1 (GRUB por compatibilidad), la integración en la Máquina de Estados de Fase 1, los hooks de mkinitcpio, los parámetros de kernel para ambos bootloaders y la gestión de swap cifrada efímera vía `/etc/crypttab`. Implementado con éxito en `install.sh`.
 
 ---
 
@@ -53,7 +53,7 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 
 ## 🗺️ Roadmap de Mejoras Sugeridas (Futuros Pasos)
 Si deseas expandir el proyecto, aquí hay ideas altamente recomendadas que se pueden abordar en las siguientes sesiones:
-* [ ] **Soporte para BTRFS:** Añadir la opción de formatear en BTRFS con soporte de subvolúmenes (`@`, `@home`, `@snapshots`) para facilitar instantáneas del sistema con Timeshift.
+* [x] **Soporte para BTRFS:** Añadida la opción de formatear en BTRFS con soporte de subvolúmenes (`@`, `@home`, `@pkg`, `@log`, `@snapshots`) y compresión `zstd`. Se integra limpiamente con LUKS y la máquina de estados. Implementación exitosa en `install.sh`.
 * [x] **Cifrado de Disco (LUKS):** Implementado cifrado completo de disco con LUKS (LUKS2 con Argon2id por defecto, fallback a LUKS1 para GRUB). Implementación exitosa en `install.sh`.
 * [ ] **Instalación de Entornos de Escritorio (DE):** Menú interactivo opcional para instalar entornos de escritorio (GNOME, KDE Plasma, XFCE) o gestores de ventanas (i3, Hyprland) con sus correspondientes drivers gráficos.
 * [x] **Esquema de Particionado Personalizado:** Implementado. Rama `particionado_personalizado` lista para merge.
