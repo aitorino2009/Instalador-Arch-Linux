@@ -659,18 +659,19 @@ mkinitcpio -P
 # Bootloader
 info "Instalando bootloader: \$BOOTLOADER"
 if [[ "\$BOOTLOADER" == "grub" ]]; then
+    sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
+    if [[ "\$LUKS" == "s" ]]; then
+        LUKS_UUID=\$(blkid -s UUID -o value "\$PART_ROOT")
+        sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"cryptdevice=UUID=\${LUKS_UUID}:cryptroot root=/dev/mapper/cryptroot\"|" /etc/default/grub
+        sed -i 's/^#GRUB_ENABLE_CRYPTODISK=y/GRUB_ENABLE_CRYPTODISK=y/' /etc/default/grub
+    fi
+
     if \$UEFI; then
         grub-install --target=x86_64-efi \
                      --efi-directory=/boot/efi \
                      --bootloader-id=GRUB --recheck
     else
         grub-install --target=i386-pc --recheck "\$DISK"
-    fi
-    sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
-    if [[ "\$LUKS" == "s" ]]; then
-        LUKS_UUID=\$(blkid -s UUID -o value "\$PART_ROOT")
-        sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"cryptdevice=UUID=\${LUKS_UUID}:cryptroot root=/dev/mapper/cryptroot\"|" /etc/default/grub
-        sed -i 's/^#GRUB_ENABLE_CRYPTODISK=y/GRUB_ENABLE_CRYPTODISK=y/' /etc/default/grub
     fi
     grub-mkconfig -o /boot/grub/grub.cfg
 else
