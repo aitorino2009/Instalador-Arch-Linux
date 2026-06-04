@@ -61,13 +61,14 @@ Antes de invocar a `pacstrap`, se construirá dinámicamente la variable `GUI_PK
 Si el usuario no elige "Ninguno" en DE o Driver, la base gráfica inamovible será: `xorg-server xorg-xinit mesa`.
 
 ### A. Capa de Hardware (Drivers)
-| Elección | Paquetes Inyectados |
-| :--- | :--- |
-| **Intel** | `xf86-video-intel vulkan-intel` |
-| **AMD** | `xf86-video-amdgpu vulkan-radeon` |
-| **NVIDIA** | `nvidia nvidia-utils` |
-| **VirtualBox/VMware** | `xf86-video-vmware virtualbox-guest-utils` |
-| **Ninguno** | *(vacío)* |
+| Elección | Paquetes Inyectados | Servicio VM (`VM_SERVICE`) |
+| :--- | :--- | :--- |
+| **Intel** | `vulkan-intel intel-media-driver` *(modesetting built-in en Xorg)* | *(vacío)* |
+| **AMD** | `xf86-video-amdgpu vulkan-radeon` | *(vacío)* |
+| **NVIDIA** | `nvidia nvidia-utils` | *(vacío)* |
+| **VirtualBox** | `virtualbox-guest-utils` *(incluye vboxvideo)* | `vboxservice` |
+| **VMware** | `open-vm-tools` | `vmtoolsd` |
+| **Ninguno** | *(vacío)* | *(vacío)* |
 
 ### B. Capa de Software (Entornos)
 | Elección | Paquetes Inyectados | Display Manager (`DM_SERVICE`) |
@@ -85,18 +86,20 @@ Si el usuario no elige "Ninguno" en DE o Driver, la base gráfica inamovible ser
 
 ## ⚙️ Configuración del Chroot — Fase 3
 
-En el archivo `/mnt/root/_chroot.sh` generado dinámicamente, se debe inyectar la nueva variable:
+En el archivo `/mnt/root/_chroot.sh` generado dinámicamente, se deben inyectar las variables:
 ```bash
-DM_SERVICE="$DM_SERVICE"
+DM_SERVICE="$DM_SERVICE"   # Gestor de sesión gráfica (gdm, sddm, lightdm)
+VM_SERVICE="$VM_SERVICE"   # Servicio de integración de VM (vboxservice, vmtoolsd)
 ```
 
-Una vez inyectada, el servicio del gestor de sesión se habilitará de forma condicional para que arranque gráficamente tras el primer reinicio:
+Una vez inyectadas, los servicios se habilitan de forma condicional:
 
 ```bash
 # Display Manager
-if [[ -n "$DM_SERVICE" ]]; then
-    systemctl enable "$DM_SERVICE"
-fi
+[[ -n "$DM_SERVICE" ]] && systemctl enable "$DM_SERVICE"
+
+# Servicios de Máquina Virtual (VirtualBox / VMware)
+[[ -n "$VM_SERVICE" ]] && systemctl enable "$VM_SERVICE"
 ```
 
 ---
