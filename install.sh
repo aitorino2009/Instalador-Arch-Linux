@@ -552,8 +552,16 @@ else
     fi
 fi
 if $UEFI; then
-    mkdir -p /mnt/boot/efi
-    mount "$PART_EFI" /mnt/boot/efi
+    if [[ "$BOOTLOADER" == "systemd-boot" ]]; then
+        ESP_DIR="/boot"
+    else
+        ESP_DIR="/boot/efi"
+    fi
+    mkdir -p "/mnt${ESP_DIR}"
+    # umask=0077 previene la advertencia de 'world accessible' en systemd-boot
+    mount -o umask=0077 "$PART_EFI" "/mnt${ESP_DIR}"
+else
+    ESP_DIR=""
 fi
 
 # ── Mirrors ────────────────────────────────────────────────────────────────────
@@ -620,6 +628,7 @@ BOOTLOADER="$BOOTLOADER"
 UEFI=$UEFI
 DISK="$DISK"
 PART_EFI="${PART_EFI:-}"
+ESP_DIR="${ESP_DIR:-}"
 PART_ROOT="$PART_ROOT"
 PART_HOME="${PART_HOME:-}"
 PART_SWAP="${PART_SWAP:-}"
@@ -687,16 +696,16 @@ if [[ "\$BOOTLOADER" == "grub" ]]; then
 
     if \$UEFI; then
         grub-install --target=x86_64-efi \
-                     --efi-directory=/boot/efi \
+                     --efi-directory=\$ESP_DIR \
                      --bootloader-id=GRUB --recheck
     else
         grub-install --target=i386-pc --recheck "\$DISK"
     fi
     grub-mkconfig -o /boot/grub/grub.cfg
 else
-    bootctl --esp-path=/boot/efi install
-    mkdir -p /boot/efi/loader/entries
-    cat > /boot/efi/loader/loader.conf <<EOF
+    bootctl --esp-path=\$ESP_DIR install
+    mkdir -p \${ESP_DIR}/loader/entries
+    cat > \${ESP_DIR}/loader/loader.conf <<EOF
 default  arch.conf
 timeout  3
 console-mode max
@@ -709,7 +718,7 @@ EOF
         ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
         ROOT_OPT="root=PARTUUID=\${ROOT_UUID} rw quiet"
     fi
-    cat > /boot/efi/loader/entries/arch.conf <<EOF
+    cat > \${ESP_DIR}/loader/entries/arch.conf <<EOF
 title   Arch Linux
 linux   /vmlinuz-\${KERNEL}
 initrd  /\${MICROCODE}.img
