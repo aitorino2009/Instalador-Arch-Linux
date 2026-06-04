@@ -152,7 +152,7 @@ while true; do
             ask_yn "¿Activar swap?" "${ACTIVATE_SWAP:-s}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             ACTIVATE_SWAP="$YN"
             HISTORIAL+=("$PASO")
-            if [[ "$ACTIVATE_SWAP" == "s" ]]; then PASO=3; else SWAP_SIZE="0"; PASO=4; fi
+            if [[ "$ACTIVATE_SWAP" == "s" ]]; then PASO=3; else SWAP_SIZE="0"; PASO="3_luks"; fi
             ;;
         3)
             ask "Tamaño de swap" "${SWAP_SIZE_OK:-8G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
@@ -178,6 +178,22 @@ while true; do
                 continue
             fi
             SWAP_SIZE_OK="$SWAP_SIZE"  # valor confirmado como válido
+            HISTORIAL+=("$PASO")
+            PASO="3_luks"
+            ;;
+        "3_luks")
+            ask_yn "¿Cifrar el disco con LUKS?" "${LUKS:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            LUKS="$YN"
+            HISTORIAL+=("$PASO")
+            if [[ "$LUKS" == "s" ]]; then PASO="3_luks_pass"; else LUKS_PASS=""; PASO=4; fi
+            ;;
+        "3_luks_pass")
+            ask_pass "Contraseña de cifrado LUKS" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            LUKS_PASS="$PASS"
+            warn "Si olvidas esta contraseña, tus datos serán irrecuperables."
+            echo -ne "     ${BOLD}Escribe 'si' para confirmar que lo entiendes:${NC} "
+            read -r CONFIRM_LUKS
+            if [[ "$CONFIRM_LUKS" != "si" ]]; then LUKS_PASS=""; continue; fi
             HISTORIAL+=("$PASO")
             PASO=4
             ;;
@@ -273,6 +289,10 @@ while true; do
                 pick "Bootloader" "grub" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             fi
             BOOTLOADER="$PICKED"
+            if [[ "$LUKS" == "s" && "$BOOTLOADER" == "grub" ]]; then
+                info "Has activado LUKS y GRUB. Se usará LUKS1 por compatibilidad."
+                sleep 2
+            fi
             HISTORIAL+=("$PASO")
             PASO=12
             ;;
@@ -336,6 +356,7 @@ echo -e "${BOLD}${BLUE}║             RESUMEN DE INSTALACIÓN                  
 echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════╝${NC}\n"
 echo -e "  ${DIM}Disco:${NC}       ${BOLD}$DISK${NC}   ${RED}(se borrará todo el contenido)${NC}"
 echo -e "  ${DIM}Swap:${NC}        $( [[ "$SWAP_SIZE" == "0" ]] && echo "desactivada" || echo "$SWAP_SIZE" )"
+echo -e "  ${DIM}Cifrado LUKS:${NC} $( [[ "${LUKS:-n}" == "s" ]] && echo -e "${GREEN}activado${NC}" || echo "desactivado" )"
 if [[ "$SEPARATE_HOME" == "s" ]]; then
     echo -e "  ${DIM}Raíz (/):${NC}    $ROOT_SIZE"
     echo -e "  ${DIM}Home (/home):${NC}${GREEN} separada ${NC}${DIM}(resto del disco)${NC}"
@@ -453,24 +474,63 @@ log "Particionado completo."
 step "·" "Formateando particiones"
 sleep 1
 $UEFI && { info "FAT32 → $PART_EFI"; mkfs.fat -F32 -n "EFI" "$PART_EFI"; }
-if [[ -n "$PART_SWAP" ]]; then
-    info "swap → $PART_SWAP"
-    mkswap -L "swap" "$PART_SWAP"
-    swapon "$PART_SWAP"
-fi
-info "ext4 → $PART_ROOT"
-mkfs.ext4 -L "root" -F "$PART_ROOT"
-if [[ -n "$PART_HOME" ]]; then
-    info "ext4 → $PART_HOME"
-    mkfs.ext4 -L "home" -F "$PART_HOME"
+
+if [[ "${LUKS:-n}" == "s" ]]; then
+    info "luksFormat → $PART_ROOT"
+    if [[ "$BOOTLOADER" == "grub" ]]; then
+        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks1 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_ROOT" -
+    else
+        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_ROOT" -
+    fi
+    info "luksOpen → cryptroot"
+    echo -n "$LUKS_PASS" | cryptsetup open "$PART_ROOT" cryptroot -
+    
+    info "ext4 → /dev/mapper/cryptroot"
+    mkfs.ext4 -L "root" -F /dev/mapper/cryptroot
+    
+    if [[ -n "$PART_HOME" ]]; then
+        info "luksFormat → $PART_HOME"
+        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_HOME" -
+        info "luksOpen → crypthome"
+        echo -n "$LUKS_PASS" | cryptsetup open "$PART_HOME" crypthome -
+        
+        info "ext4 → /dev/mapper/crypthome"
+        mkfs.ext4 -L "home" -F /dev/mapper/crypthome
+    fi
+    
+    if [[ -n "$PART_SWAP" ]]; then
+        info "swap → $PART_SWAP"
+        mkswap -L "swap" "$PART_SWAP"
+        swapon "$PART_SWAP"
+    fi
+else
+    if [[ -n "$PART_SWAP" ]]; then
+        info "swap → $PART_SWAP"
+        mkswap -L "swap" "$PART_SWAP"
+        swapon "$PART_SWAP"
+    fi
+    info "ext4 → $PART_ROOT"
+    mkfs.ext4 -L "root" -F "$PART_ROOT"
+    if [[ -n "$PART_HOME" ]]; then
+        info "ext4 → $PART_HOME"
+        mkfs.ext4 -L "home" -F "$PART_HOME"
+    fi
 fi
 log "Formato completo."
 
 # ── Montaje ────────────────────────────────────────────────────────────────────
-mount "$PART_ROOT" /mnt
-if [[ -n "$PART_HOME" ]]; then
-    mkdir -p /mnt/home
-    mount "$PART_HOME" /mnt/home
+if [[ "${LUKS:-n}" == "s" ]]; then
+    mount /dev/mapper/cryptroot /mnt
+    if [[ -n "$PART_HOME" ]]; then
+        mkdir -p /mnt/home
+        mount /dev/mapper/crypthome /mnt/home
+    fi
+else
+    mount "$PART_ROOT" /mnt
+    if [[ -n "$PART_HOME" ]]; then
+        mkdir -p /mnt/home
+        mount "$PART_HOME" /mnt/home
+    fi
 fi
 if $UEFI; then
     mkdir -p /mnt/boot/efi
@@ -504,7 +564,7 @@ step "·" "Instalando sistema base (esto tarda un poco)"
 pacstrap -K /mnt \
     base "$KERNEL" "${KERNEL}-headers" linux-firmware base-devel \
     "$MICROCODE" \
-    networkmanager git nvim vim sudo curl wget reflector \
+    networkmanager git nvim vim sudo curl wget reflector cryptsetup \
     man-db man-pages bash-completion htop openssh \
     grub efibootmgr os-prober
 log "Sistema base instalado."
@@ -543,6 +603,8 @@ DISK="$DISK"
 PART_EFI="${PART_EFI:-}"
 PART_ROOT="$PART_ROOT"
 PART_HOME="${PART_HOME:-}"
+PART_SWAP="${PART_SWAP:-}"
+LUKS="${LUKS:-n}"
 AUR_HELPER="$AUR_HELPER"
 DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
@@ -589,6 +651,9 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 # initramfs
 info "Generando initramfs…"
+if [[ "$LUKS" == "s" ]]; then
+    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck)/' /etc/mkinitcpio.conf
+fi
 mkinitcpio -P
 
 # Bootloader
@@ -602,10 +667,14 @@ if [[ "\$BOOTLOADER" == "grub" ]]; then
         grub-install --target=i386-pc --recheck "\$DISK"
     fi
     sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
+    if [[ "\$LUKS" == "s" ]]; then
+        LUKS_UUID=\$(blkid -s UUID -o value "\$PART_ROOT")
+        sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"cryptdevice=UUID=\${LUKS_UUID}:cryptroot root=/dev/mapper/cryptroot\"|" /etc/default/grub
+        sed -i 's/^#GRUB_ENABLE_CRYPTODISK=y/GRUB_ENABLE_CRYPTODISK=y/' /etc/default/grub
+    fi
     grub-mkconfig -o /boot/grub/grub.cfg
 else
     bootctl --esp-path=/boot/efi install
-    ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
     mkdir -p /boot/efi/loader/entries
     cat > /boot/efi/loader/loader.conf <<EOF
 default  arch.conf
@@ -613,13 +682,33 @@ timeout  3
 console-mode max
 editor   no
 EOF
+    if [[ "\$LUKS" == "s" ]]; then
+        LUKS_UUID=\$(blkid -s UUID -o value "\$PART_ROOT")
+        ROOT_OPT="cryptdevice=UUID=\${LUKS_UUID}:cryptroot root=/dev/mapper/cryptroot rw"
+    else
+        ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
+        ROOT_OPT="root=PARTUUID=\${ROOT_UUID} rw quiet"
+    fi
     cat > /boot/efi/loader/entries/arch.conf <<EOF
 title   Arch Linux
 linux   /vmlinuz-\${KERNEL}
 initrd  /\${MICROCODE}.img
 initrd  /initramfs-\${KERNEL}.img
-options root=PARTUUID=\${ROOT_UUID} rw quiet
+options \${ROOT_OPT}
 EOF
+fi
+
+if [[ "\$LUKS" == "s" ]]; then
+    if [[ -n "\$PART_HOME" ]]; then
+        HOME_UUID=\$(blkid -s UUID -o value "\$PART_HOME")
+        echo "crypthome  UUID=\${HOME_UUID}  none  luks" >> /etc/crypttab
+    fi
+    if [[ -n "\$PART_SWAP" ]]; then
+        SWAP_UUID=\$(blkid -s UUID -o value "\$PART_SWAP")
+        echo "swap  UUID=\${SWAP_UUID}  /dev/urandom  swap,cipher=aes-xts-plain64,size=256" >> /etc/crypttab
+        sed -i "/UUID=\${SWAP_UUID}/d" /etc/fstab
+        echo "/dev/mapper/swap  none  swap  defaults  0  0" >> /etc/fstab
+    fi
 fi
 log "Bootloader instalado."
 
@@ -666,6 +755,10 @@ rm -f /mnt/root/_chroot.sh
 step "·" "Desmontando"
 umount -R /mnt
 [[ -n "${PART_SWAP:-}" ]] && swapoff "$PART_SWAP" 2>/dev/null || true
+if [[ "${LUKS:-n}" == "s" ]]; then
+    cryptsetup close crypthome 2>/dev/null || true
+    cryptsetup close cryptroot 2>/dev/null || true
+fi
 
 # ── Fin ────────────────────────────────────────────────────────────────────────
 clear

@@ -33,6 +33,8 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 * **⚠️ BUG — Ctrl+C durante reflector rompe el script:** Con `set -euo pipefail` activo, una señal `SIGINT` (Ctrl+C) lanzada sobre `reflector` propagaba el error al shell padre y abortaba el instalador. La solución es usar `trap '_MIRRORS_OK=interrupted' INT` justo antes del comando y `trap - INT` justo después, evaluando el resultado mediante una variable de estado sin dejar que el error escape al contexto padre. Se avisa al usuario con `info "(Ctrl+C para omitir)"`.
 * **⚠️ BUG — Formateo falla si /mnt ya tiene particiones montadas (reinstalación):** Si se ejecuta el instalador sobre un sistema que ya intentó instalarse, `mkfs.fat` falla con "contains a mounted filesystem". La solución es comprobar con `mountpoint -q /mnt` antes de iniciar la Fase 2 y, si hay algo montado, ofrecer al usuario la opción de desmontar todo (`swapoff -a && umount -R /mnt`) o cancelar de forma controlada.
 
+* **Spec de Cifrado LUKS:** Especificación técnica completa escrita en `.agent/specs/cifrado_luks.md`. Cubre la estrategia de cifrado de root y home con LUKS2 (systemd-boot) y LUKS1 (GRUB por compatibilidad), la integración en la Máquina de Estados de Fase 1, los hooks de mkinitcpio, los parámetros de kernel para ambos bootloaders y la gestión de swap cifrada efímera vía `/etc/crypttab`. Pendiente de implementación en `install.sh`.
+
 ---
 
 ## 📊 Estado Actual del Proyecto
@@ -47,6 +49,6 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 ## 🗺️ Roadmap de Mejoras Sugeridas (Futuros Pasos)
 Si deseas expandir el proyecto, aquí hay ideas altamente recomendadas que se pueden abordar en las siguientes sesiones:
 * [ ] **Soporte para BTRFS:** Añadir la opción de formatear en BTRFS con soporte de subvolúmenes (`@`, `@home`, `@snapshots`) para facilitar instantáneas del sistema con Timeshift.
-* [ ] **Cifrado de Disco (LUKS):** Implementar cifrado completo de disco con LUKS para usuarios que requieran máxima seguridad en equipos portátiles.
+* [x] **Cifrado de Disco (LUKS):** Implementado cifrado completo de disco con LUKS (LUKS2 con Argon2id por defecto, fallback a LUKS1 para GRUB). Implementación exitosa en `install.sh`.
 * [ ] **Instalación de Entornos de Escritorio (DE):** Menú interactivo opcional para instalar entornos de escritorio (GNOME, KDE Plasma, XFCE) o gestores de ventanas (i3, Hyprland) con sus correspondientes drivers gráficos.
 * [x] **Esquema de Particionado Personalizado:** Implementado. Rama `particionado_personalizado` lista para merge.
