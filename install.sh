@@ -152,12 +152,12 @@ while true; do
             ask_yn "¿Activar swap?" "${ACTIVATE_SWAP:-s}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             ACTIVATE_SWAP="$YN"
             HISTORIAL+=("$PASO")
-            if [[ "$ACTIVATE_SWAP" == "s" ]]; then PASO=3; else SWAP_SIZE="0"; PASO=4; fi
+            if [[ "$ACTIVATE_SWAP" == "s" ]]; then PASO=3; else SWAP_SIZE="0"; PASO="3_luks"; fi
             ;;
         3)
-            ask "Tamaño de swap" "${SWAP_SIZE:-8G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ask "Tamaño de swap" "${SWAP_SIZE_OK:-8G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             SWAP_SIZE="$REPLY"
-            validar_tamano "$SWAP_SIZE" || continue
+            if ! validar_tamano "$SWAP_SIZE"; then SWAP_SIZE=""; continue; fi
             
             swap_mb=$(convertir_a_mb "$SWAP_SIZE")
             swap_gb=$(( swap_mb / 1024 ))
@@ -173,9 +173,27 @@ while true; do
                     PASO=4
                 else
                     info "Por favor, elige un tamaño de Swap menor (máximo recomendado: ${max_swap_gb}G)."
+                    SWAP_SIZE=""  # limpiar para que el default no muestre el valor inválido
                 fi
                 continue
             fi
+            SWAP_SIZE_OK="$SWAP_SIZE"  # valor confirmado como válido
+            HISTORIAL+=("$PASO")
+            PASO="3_luks"
+            ;;
+        "3_luks")
+            ask_yn "¿Cifrar el disco con LUKS?" "${LUKS:-n}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            LUKS="$YN"
+            HISTORIAL+=("$PASO")
+            if [[ "$LUKS" == "s" ]]; then PASO="3_luks_pass"; else LUKS_PASS=""; PASO=4; fi
+            ;;
+        "3_luks_pass")
+            ask_pass "Contraseña de cifrado LUKS" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            LUKS_PASS="$PASS"
+            warn "Si olvidas esta contraseña, tus datos serán irrecuperables."
+            echo -ne "     ${BOLD}Escribe 'si' para confirmar que lo entiendes:${NC} "
+            read -r CONFIRM_LUKS
+            if [[ "$CONFIRM_LUKS" != "si" ]]; then LUKS_PASS=""; continue; fi
             HISTORIAL+=("$PASO")
             PASO=4
             ;;
@@ -200,10 +218,10 @@ while true; do
                 if (( suggested_root_gb < 10 )); then suggested_root_gb=10; fi
             fi
             
-            ask "Tamaño de la partición raíz (/)" "${ROOT_SIZE:-${suggested_root_gb}G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ask "Tamaño de la partición raíz (/)" "${ROOT_SIZE_OK:-${suggested_root_gb}G}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             ROOT_SIZE="$REPLY"
             
-            validar_tamano "$ROOT_SIZE" || continue
+            if ! validar_tamano "$ROOT_SIZE"; then ROOT_SIZE=""; continue; fi
             
             swap_mb=$(convertir_a_mb "$SWAP_SIZE")
             root_mb=$(convertir_a_mb "$ROOT_SIZE")
@@ -215,7 +233,7 @@ while true; do
             if (( root_mb < 10240 )); then
                 warn "El tamaño solicitado de raíz ($ROOT_SIZE) es inferior al mínimo recomendado (10 GB)."
                 info "Por favor, elige un tamaño de al menos 10G."
-                continue
+                ROOT_SIZE=""; continue
             elif (( total_req_gb >= DISK_SIZE_GB )); then
                 warn "Raíz ($ROOT_SIZE) + Swap ($SWAP_SIZE) + EFI = $total_req_gb GB supera el disco ($DISK_SIZE_GB GB)."
                 if (( max_allowed_root_mb <= 0 )); then
@@ -223,12 +241,13 @@ while true; do
                 else
                     info "Elige un tamaño menor para la raíz (máximo recomendado: $(( max_allowed_root_mb / 1024 ))G)."
                 fi
-                continue
+                ROOT_SIZE=""; continue
             elif (( root_mb > max_allowed_root_mb )); then
                 warn "Raíz ($ROOT_SIZE) no deja espacio útil para /home (mínimo 2 GB)."
                 info "Tamaño máximo de raíz permitido: $(( max_allowed_root_mb / 1024 ))G."
-                continue
+                ROOT_SIZE=""; continue
             fi
+            ROOT_SIZE_OK="$ROOT_SIZE"  # valor confirmado como válido
             HISTORIAL+=("$PASO")
             PASO=6
             ;;
@@ -270,6 +289,10 @@ while true; do
                 pick "Bootloader" "grub" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             fi
             BOOTLOADER="$PICKED"
+            if [[ "$LUKS" == "s" && "$BOOTLOADER" == "grub" ]]; then
+                info "Has activado LUKS y GRUB. Se usará LUKS1 por compatibilidad."
+                sleep 2
+            fi
             HISTORIAL+=("$PASO")
             PASO=12
             ;;
@@ -333,6 +356,7 @@ echo -e "${BOLD}${BLUE}║             RESUMEN DE INSTALACIÓN                  
 echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════╝${NC}\n"
 echo -e "  ${DIM}Disco:${NC}       ${BOLD}$DISK${NC}   ${RED}(se borrará todo el contenido)${NC}"
 echo -e "  ${DIM}Swap:${NC}        $( [[ "$SWAP_SIZE" == "0" ]] && echo "desactivada" || echo "$SWAP_SIZE" )"
+echo -e "  ${DIM}Cifrado LUKS:${NC} $( [[ "${LUKS:-n}" == "s" ]] && echo -e "${GREEN}activado${NC}" || echo "desactivado" )"
 if [[ "$SEPARATE_HOME" == "s" ]]; then
     echo -e "  ${DIM}Raíz (/):${NC}    $ROOT_SIZE"
     echo -e "  ${DIM}Home (/home):${NC}${GREEN} separada ${NC}${DIM}(resto del disco)${NC}"
@@ -371,6 +395,23 @@ part() {
 # ══════════════════════════════════════════════════════════════════════════════
 #  FASE 2 — INSTALACIÓN AUTOMÁTICA
 # ══════════════════════════════════════════════════════════════════════════════
+
+# ── Comprobación de montajes previos ──────────────────────────────────────────
+if mountpoint -q /mnt 2>/dev/null || grep -q '^[^ ]* /mnt' /proc/mounts 2>/dev/null; then
+    echo ""
+    warn "Se ha detectado que ${BOLD}/mnt${NC}${YELLOW} ya tiene particiones montadas (posible instalación previa)."
+    echo -ne "\n${BOLD}  ¿Desmontar todo y continuar? (s/n):${NC} "
+    read -r _UMOUNT_CONFIRM
+    if [[ "$_UMOUNT_CONFIRM" =~ ^[sS]$ ]]; then
+        info "Desmontando /mnt..."
+        swapoff -a 2>/dev/null || true
+        umount -R /mnt 2>/dev/null || true
+        log "Desmontado. Continuando con la instalación."
+    else
+        info "Instalación cancelada por el usuario."
+        exit 0
+    fi
+fi
 
 # ── Particionado ───────────────────────────────────────────────────────────────
 step "·" "Particionando $DISK"
@@ -433,24 +474,63 @@ log "Particionado completo."
 step "·" "Formateando particiones"
 sleep 1
 $UEFI && { info "FAT32 → $PART_EFI"; mkfs.fat -F32 -n "EFI" "$PART_EFI"; }
-if [[ -n "$PART_SWAP" ]]; then
-    info "swap → $PART_SWAP"
-    mkswap -L "swap" "$PART_SWAP"
-    swapon "$PART_SWAP"
-fi
-info "ext4 → $PART_ROOT"
-mkfs.ext4 -L "root" -F "$PART_ROOT"
-if [[ -n "$PART_HOME" ]]; then
-    info "ext4 → $PART_HOME"
-    mkfs.ext4 -L "home" -F "$PART_HOME"
+
+if [[ "${LUKS:-n}" == "s" ]]; then
+    info "luksFormat → $PART_ROOT"
+    if [[ "$BOOTLOADER" == "grub" ]]; then
+        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks1 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_ROOT" -
+    else
+        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_ROOT" -
+    fi
+    info "luksOpen → cryptroot"
+    echo -n "$LUKS_PASS" | cryptsetup open "$PART_ROOT" cryptroot -
+    
+    info "ext4 → /dev/mapper/cryptroot"
+    mkfs.ext4 -L "root" -F /dev/mapper/cryptroot
+    
+    if [[ -n "$PART_HOME" ]]; then
+        info "luksFormat → $PART_HOME"
+        echo -n "$LUKS_PASS" | cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha256 --iter-time 3000 "$PART_HOME" -
+        info "luksOpen → crypthome"
+        echo -n "$LUKS_PASS" | cryptsetup open "$PART_HOME" crypthome -
+        
+        info "ext4 → /dev/mapper/crypthome"
+        mkfs.ext4 -L "home" -F /dev/mapper/crypthome
+    fi
+    
+    if [[ -n "$PART_SWAP" ]]; then
+        info "swap → $PART_SWAP"
+        mkswap -L "swap" "$PART_SWAP"
+        swapon "$PART_SWAP"
+    fi
+else
+    if [[ -n "$PART_SWAP" ]]; then
+        info "swap → $PART_SWAP"
+        mkswap -L "swap" "$PART_SWAP"
+        swapon "$PART_SWAP"
+    fi
+    info "ext4 → $PART_ROOT"
+    mkfs.ext4 -L "root" -F "$PART_ROOT"
+    if [[ -n "$PART_HOME" ]]; then
+        info "ext4 → $PART_HOME"
+        mkfs.ext4 -L "home" -F "$PART_HOME"
+    fi
 fi
 log "Formato completo."
 
 # ── Montaje ────────────────────────────────────────────────────────────────────
-mount "$PART_ROOT" /mnt
-if [[ -n "$PART_HOME" ]]; then
-    mkdir -p /mnt/home
-    mount "$PART_HOME" /mnt/home
+if [[ "${LUKS:-n}" == "s" ]]; then
+    mount /dev/mapper/cryptroot /mnt
+    if [[ -n "$PART_HOME" ]]; then
+        mkdir -p /mnt/home
+        mount /dev/mapper/crypthome /mnt/home
+    fi
+else
+    mount "$PART_ROOT" /mnt
+    if [[ -n "$PART_HOME" ]]; then
+        mkdir -p /mnt/home
+        mount "$PART_HOME" /mnt/home
+    fi
 fi
 if $UEFI; then
     mkdir -p /mnt/boot/efi
@@ -459,9 +539,20 @@ fi
 
 # ── Mirrors ────────────────────────────────────────────────────────────────────
 step "·" "Actualizando mirrors"
+info "(Ctrl+C para omitir y usar los mirrors actuales)"
+_MIRRORS_OK=false
+trap '_MIRRORS_OK=interrupted' INT
 reflector --verbose --country Spain,France,Germany --age 12 --protocol https \
-          --sort rate --save /etc/pacman.d/mirrorlist \
-    && log "Mirrors actualizados." || warn "reflector falló, usando mirrors existentes."
+          --sort rate --save /etc/pacman.d/mirrorlist && _MIRRORS_OK=true || true
+trap - INT
+if [[ "$_MIRRORS_OK" == "true" ]]; then
+    log "Mirrors actualizados."
+elif [[ "$_MIRRORS_OK" == "interrupted" ]]; then
+    echo ""
+    warn "Actualización de mirrors cancelada. Usando los mirrors que ya tiene la ISO."
+else
+    warn "reflector falló. Usando los mirrors que ya tiene la ISO."
+fi
 
 # ── Microcode ──────────────────────────────────────────────────────────────────
 CPU_VENDOR=$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
@@ -473,7 +564,7 @@ step "·" "Instalando sistema base (esto tarda un poco)"
 pacstrap -K /mnt \
     base "$KERNEL" "${KERNEL}-headers" linux-firmware base-devel \
     "$MICROCODE" \
-    networkmanager git nvim vim sudo curl wget reflector \
+    networkmanager git nvim vim sudo curl wget reflector cryptsetup \
     man-db man-pages bash-completion htop openssh \
     grub efibootmgr os-prober
 log "Sistema base instalado."
@@ -512,6 +603,8 @@ DISK="$DISK"
 PART_EFI="${PART_EFI:-}"
 PART_ROOT="$PART_ROOT"
 PART_HOME="${PART_HOME:-}"
+PART_SWAP="${PART_SWAP:-}"
+LUKS="${LUKS:-n}"
 AUR_HELPER="$AUR_HELPER"
 DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
@@ -558,6 +651,9 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 # initramfs
 info "Generando initramfs…"
+if [[ "$LUKS" == "s" ]]; then
+    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck)/' /etc/mkinitcpio.conf
+fi
 mkinitcpio -P
 
 # Bootloader
@@ -571,10 +667,14 @@ if [[ "\$BOOTLOADER" == "grub" ]]; then
         grub-install --target=i386-pc --recheck "\$DISK"
     fi
     sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
+    if [[ "\$LUKS" == "s" ]]; then
+        LUKS_UUID=\$(blkid -s UUID -o value "\$PART_ROOT")
+        sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"cryptdevice=UUID=\${LUKS_UUID}:cryptroot root=/dev/mapper/cryptroot\"|" /etc/default/grub
+        sed -i 's/^#GRUB_ENABLE_CRYPTODISK=y/GRUB_ENABLE_CRYPTODISK=y/' /etc/default/grub
+    fi
     grub-mkconfig -o /boot/grub/grub.cfg
 else
     bootctl --esp-path=/boot/efi install
-    ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
     mkdir -p /boot/efi/loader/entries
     cat > /boot/efi/loader/loader.conf <<EOF
 default  arch.conf
@@ -582,13 +682,33 @@ timeout  3
 console-mode max
 editor   no
 EOF
+    if [[ "\$LUKS" == "s" ]]; then
+        LUKS_UUID=\$(blkid -s UUID -o value "\$PART_ROOT")
+        ROOT_OPT="cryptdevice=UUID=\${LUKS_UUID}:cryptroot root=/dev/mapper/cryptroot rw"
+    else
+        ROOT_UUID=\$(blkid -s PARTUUID -o value "\$PART_ROOT")
+        ROOT_OPT="root=PARTUUID=\${ROOT_UUID} rw quiet"
+    fi
     cat > /boot/efi/loader/entries/arch.conf <<EOF
 title   Arch Linux
 linux   /vmlinuz-\${KERNEL}
 initrd  /\${MICROCODE}.img
 initrd  /initramfs-\${KERNEL}.img
-options root=PARTUUID=\${ROOT_UUID} rw quiet
+options \${ROOT_OPT}
 EOF
+fi
+
+if [[ "\$LUKS" == "s" ]]; then
+    if [[ -n "\$PART_HOME" ]]; then
+        HOME_UUID=\$(blkid -s UUID -o value "\$PART_HOME")
+        echo "crypthome  UUID=\${HOME_UUID}  none  luks" >> /etc/crypttab
+    fi
+    if [[ -n "\$PART_SWAP" ]]; then
+        SWAP_UUID=\$(blkid -s UUID -o value "\$PART_SWAP")
+        echo "swap  UUID=\${SWAP_UUID}  /dev/urandom  swap,cipher=aes-xts-plain64,size=256" >> /etc/crypttab
+        sed -i "/UUID=\${SWAP_UUID}/d" /etc/fstab
+        echo "/dev/mapper/swap  none  swap  defaults  0  0" >> /etc/fstab
+    fi
 fi
 log "Bootloader instalado."
 
@@ -635,6 +755,10 @@ rm -f /mnt/root/_chroot.sh
 step "·" "Desmontando"
 umount -R /mnt
 [[ -n "${PART_SWAP:-}" ]] && swapoff "$PART_SWAP" 2>/dev/null || true
+if [[ "${LUKS:-n}" == "s" ]]; then
+    cryptsetup close crypthome 2>/dev/null || true
+    cryptsetup close cryptroot 2>/dev/null || true
+fi
 
 # ── Fin ────────────────────────────────────────────────────────────────────────
 clear
