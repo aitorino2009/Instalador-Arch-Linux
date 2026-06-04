@@ -259,8 +259,14 @@ while true; do
             ;;
         7)
             echo -e "\n${DIM}  Ejemplos: Europe/Madrid, America/New_York, Asia/Tokyo${NC}"
-            ask "Zona horaria" "${TIMEZONE:-Europe/Madrid}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            ask "Zona horaria" "${TIMEZONE_OK:-Europe/Madrid}" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             TIMEZONE="$REPLY"
+            if [[ ! -f "/usr/share/zoneinfo/$TIMEZONE" ]]; then
+                warn "La zona horaria '$TIMEZONE' no es válida o no existe."
+                TIMEZONE=""
+                continue
+            fi
+            TIMEZONE_OK="$TIMEZONE"
             HISTORIAL+=("$PASO")
             PASO=8
             ;;
@@ -397,16 +403,26 @@ part() {
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Comprobación de montajes previos ──────────────────────────────────────────
+_NEEDS_CLEANUP=false
 if mountpoint -q /mnt 2>/dev/null || grep -q '^[^ ]* /mnt' /proc/mounts 2>/dev/null; then
+    _NEEDS_CLEANUP=true
+fi
+if lsblk "$DISK" 2>/dev/null | grep -q "crypt"; then
+    _NEEDS_CLEANUP=true
+fi
+
+if $_NEEDS_CLEANUP; then
     echo ""
-    warn "Se ha detectado que ${BOLD}/mnt${NC}${YELLOW} ya tiene particiones montadas (posible instalación previa)."
-    echo -ne "\n${BOLD}  ¿Desmontar todo y continuar? (s/n):${NC} "
+    warn "Se han detectado particiones montadas o contenedores LUKS abiertos en el disco destino."
+    echo -ne "\n${BOLD}  ¿Desmontar y cerrar todo para continuar? (s/n):${NC} "
     read -r _UMOUNT_CONFIRM
     if [[ "$_UMOUNT_CONFIRM" =~ ^[sS]$ ]]; then
-        info "Desmontando /mnt..."
+        info "Limpiando montajes y contenedores..."
         swapoff -a 2>/dev/null || true
         umount -R /mnt 2>/dev/null || true
-        log "Desmontado. Continuando con la instalación."
+        cryptsetup close crypthome 2>/dev/null || true
+        cryptsetup close cryptroot 2>/dev/null || true
+        log "Limpieza completada. Continuando con la instalación."
     else
         info "Instalación cancelada por el usuario."
         exit 0
@@ -468,6 +484,9 @@ else
     fi
     PART_EFI=""
 fi
+info "Recargando tabla de particiones (partprobe)..."
+partprobe "$DISK" 2>/dev/null || true
+sleep 2
 log "Particionado completo."
 
 # ── Formato ────────────────────────────────────────────────────────────────────
