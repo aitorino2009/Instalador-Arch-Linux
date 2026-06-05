@@ -344,7 +344,7 @@ while true; do
             PASO=16
             ;;
         16)
-            pick "Entorno de Escritorio" "GNOME" "KDE Plasma" "XFCE" "Hyprland (Wayland)" "i3-wm (X11)" "Ninguno" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
+            pick "Entorno de Escritorio" "GNOME" "KDE Plasma" "XFCE" "Hyprland (Wayland)" "i3-wm (X11)" "Todos" "Ninguno" || { PASO="${HISTORIAL[-1]}"; unset 'HISTORIAL[-1]'; continue; }
             DESKTOP_ENV="$PICKED"
             HISTORIAL+=("$PASO")
             PASO=17
@@ -645,7 +645,12 @@ if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servid
     elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"XFCE"* ]]; then GUI_PKGS+=" xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
     elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm"; DM_SERVICE="sddm";
-    elif [[ "$DESKTOP_ENV" == *"i3"* ]]; then GUI_PKGS+=" i3-wm i3status i3lock dmenu alacritty lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm"; fi
+    elif [[ "$DESKTOP_ENV" == *"i3"* ]]; then GUI_PKGS+=" i3-wm i3status i3lock dmenu alacritty lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
+    elif [[ "$DESKTOP_ENV" == *"Todos"* ]]; then
+        # Instala todos los entornos. SDDM como DM unificado (soporta X11 y Wayland).
+        GUI_PKGS+=" gnome gnome-tweaks plasma-meta konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm"
+        DM_SERVICE="sddm"
+    fi
 fi
 
 pacstrap -K /mnt \
@@ -713,6 +718,27 @@ sed -i "s/#\${LANG_EXTRA}/\${LANG_EXTRA}/" /etc/locale.gen
 locale-gen
 echo "LANG=\$LOCALE"  > /etc/locale.conf
 echo "KEYMAP=\$KEYMAP" > /etc/vconsole.conf
+
+# Configurar teclado X11 para sesiones gráficas y pantalla de login (SDDM/LightDM)
+# Mapeo de keymap de consola (vconsole) al layout xkb equivalente para X11
+if [[ -n "\$DM_SERVICE" ]]; then
+    case "\$KEYMAP" in
+        es)    XKB_LAYOUT="es" ;;
+        fr)    XKB_LAYOUT="fr" ;;
+        de)    XKB_LAYOUT="de" ;;
+        latam) XKB_LAYOUT="latam" ;;
+        *)     XKB_LAYOUT="us" ;;  # en, us y cualquier otro
+    esac
+    mkdir -p /etc/X11/xorg.conf.d
+    cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<EOF
+Section "InputClass"
+    Identifier "system-keyboard"
+    MatchIsKeyboard "on"
+    Option "XkbLayout" "\$XKB_LAYOUT"
+EndSection
+EOF
+    info "Teclado X11 configurado: \$XKB_LAYOUT"
+fi
 
 # Hostname
 echo "\$HOSTNAME" > /etc/hostname
@@ -805,8 +831,13 @@ if [[ "\$LUKS" == "s" ]]; then
         echo "crypthome  UUID=\${HOME_UUID}  none  luks" >> /etc/crypttab
     fi
     if [[ -n "\$PART_SWAP" ]]; then
+        # Usar PARTUUID (identificador de partición GPT) en lugar de UUID (filesystem).
+        # PARTUUID está disponible desde el inicio del arranque sin depender de udev,
+        # lo que elimina el job lento de espera de /dev/disk/by-uuid/...
+        # timeout=10 evita la espera infinita de /dev/mapper/swap si el dispositivo falla.
+        SWAP_PARTUUID=\$(blkid -s PARTUUID -o value "\$PART_SWAP")
         SWAP_UUID=\$(blkid -s UUID -o value "\$PART_SWAP")
-        echo "swap  UUID=\${SWAP_UUID}  /dev/urandom  swap,cipher=aes-xts-plain64,size=256" >> /etc/crypttab
+        echo "swap  PARTUUID=\${SWAP_PARTUUID}  /dev/urandom  swap,cipher=aes-xts-plain64,size=256,timeout=10" >> /etc/crypttab
         sed -i "/UUID=\${SWAP_UUID}/d" /etc/fstab
         echo "/dev/mapper/swap  none  swap  defaults  0  0" >> /etc/fstab
     fi
