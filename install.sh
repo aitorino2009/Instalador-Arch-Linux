@@ -642,13 +642,13 @@ if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servid
     elif [[ "$VIDEO_DRIVER" == "VMware" ]]; then GUI_PKGS+=" open-vm-tools"; VM_SERVICE="vmtoolsd"; fi
 
     if [[ "$DESKTOP_ENV" == *"GNOME"* ]]; then GUI_PKGS+=" gnome gnome-tweaks gdm"; DM_SERVICE="gdm";
-    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm qt6-5compat qt6-declarative qt6-svg"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"XFCE"* ]]; then GUI_PKGS+=" xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
-    elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm qt6-5compat qt6-declarative qt6-svg"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"i3"* ]]; then GUI_PKGS+=" i3-wm i3status i3lock dmenu alacritty lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
     elif [[ "$DESKTOP_ENV" == *"Todos"* ]]; then
         # Instala todos los entornos. SDDM como DM unificado (soporta X11 y Wayland).
-        GUI_PKGS+=" gnome gnome-tweaks plasma-meta konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm qt6-5compat qt6-declarative qt6-svg"
+        GUI_PKGS+=" gnome gnome-tweaks plasma-meta konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"
         DM_SERVICE="sddm"
     fi
 fi
@@ -888,9 +888,19 @@ fi
 
 # Mejorar esttica de SDDM (Instalar Tema Astronaut)
 if [[ "\$DM_SERVICE" == "sddm" ]]; then
-    info "Instalando tema premium para SDDM (Astronaut)…"
+    info "Instalando tema premium para SDDM (Astronaut) con fondo animado…"
     mkdir -p /usr/share/sddm/themes
     if git clone https://github.com/Keyitdev/sddm-astronaut-theme.git /usr/share/sddm/themes/sddm-astronaut-theme; then
+        
+        # Descargar el video animado en la carpeta de Backgrounds del tema
+        info "Descargando fondo animado (vídeo)..."
+        wget -q -O /usr/share/sddm/themes/sddm-astronaut-theme/Backgrounds/video_bg.mp4 "https://wallsflow.com/index.php?do=download&id=697&hash=3fbb57169d9d09ac4f3e8d5da7b6b9fa" || true
+
+        # Modificar el theme.conf para usar el vídeo en lugar de la imagen png
+        if [[ -f /usr/share/sddm/themes/sddm-astronaut-theme/theme.conf ]]; then
+            sed -i 's|^Background=.*|Background="Backgrounds/video_bg.mp4"|' /usr/share/sddm/themes/sddm-astronaut-theme/theme.conf
+        fi
+
         mkdir -p /etc/sddm.conf.d
         cat > /etc/sddm.conf.d/theme.conf <<EOF
 [Theme]
