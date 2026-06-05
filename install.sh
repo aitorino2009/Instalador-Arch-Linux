@@ -642,13 +642,13 @@ if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servid
     elif [[ "$VIDEO_DRIVER" == "VMware" ]]; then GUI_PKGS+=" open-vm-tools"; VM_SERVICE="vmtoolsd"; fi
 
     if [[ "$DESKTOP_ENV" == *"GNOME"* ]]; then GUI_PKGS+=" gnome gnome-tweaks gdm"; DM_SERVICE="gdm";
-    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm qt6-5compat qt6-declarative qt6-svg"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"XFCE"* ]]; then GUI_PKGS+=" xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
-    elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm qt6-5compat qt6-declarative qt6-svg"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"i3"* ]]; then GUI_PKGS+=" i3-wm i3status i3lock dmenu alacritty lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
     elif [[ "$DESKTOP_ENV" == *"Todos"* ]]; then
         # Instala todos los entornos. SDDM como DM unificado (soporta X11 y Wayland).
-        GUI_PKGS+=" gnome gnome-tweaks plasma-meta konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm"
+        GUI_PKGS+=" gnome gnome-tweaks plasma-meta konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm qt6-5compat qt6-declarative qt6-svg"
         DM_SERVICE="sddm"
     fi
 fi
@@ -699,6 +699,7 @@ PART_HOME="${PART_HOME:-}"
 PART_SWAP="${PART_SWAP:-}"
 LUKS="${LUKS:-n}"
 FS="$FS"
+DESKTOP_ENV="$DESKTOP_ENV"
 DM_SERVICE="$DM_SERVICE"
 VM_SERVICE="$VM_SERVICE"
 AUR_HELPER="$AUR_HELPER"
@@ -874,6 +875,31 @@ if [[ -n "\$DOTFILES_REPO" ]]; then
         cd /home/\${USERNAME}/.dotfiles
         [[ -f '\$DOTFILES_SCRIPT' ]] && bash '\$DOTFILES_SCRIPT' || true
     " && log "Dotfiles instalados." || echo "  !  Dotfiles fallaron. Instálalos luego manualmente."
+fi
+
+# Arreglo para Hyprland (Evitar el config STUB)
+if [[ "\$DESKTOP_ENV" == *"Hyprland"* || "\$DESKTOP_ENV" == *"Todos"* ]]; then
+    if [[ -f /usr/share/hypr/hyprland.conf ]]; then
+        info "Configurando Hyprland por defecto…"
+        sudo -u "\$USERNAME" mkdir -p "/home/\$USERNAME/.config/hypr"
+        sudo -u "\$USERNAME" cp /usr/share/hypr/hyprland.conf "/home/\$USERNAME/.config/hypr/hyprland.conf"
+    fi
+fi
+
+# Mejorar esttica de SDDM (Instalar Tema Astronaut)
+if [[ "\$DM_SERVICE" == "sddm" ]]; then
+    info "Instalando tema premium para SDDM (Astronaut)…"
+    mkdir -p /usr/share/sddm/themes
+    if git clone https://github.com/Keyitdev/sddm-astronaut-theme.git /usr/share/sddm/themes/sddm-astronaut-theme; then
+        mkdir -p /etc/sddm.conf.d
+        cat > /etc/sddm.conf.d/theme.conf <<EOF
+[Theme]
+Current=sddm-astronaut-theme
+EOF
+        log "Tema SDDM Astronaut configurado con xito."
+    else
+        echo "  !  Fallo al descargar el tema SDDM. Se usar el por defecto."
+    fi
 fi
 
 log "Chroot completado."
