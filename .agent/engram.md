@@ -16,6 +16,7 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 4. **Resiliencia Base:** El sistema base debe quedar 100% intacto y funcional aunque los módulos extras (como AUR helper o dotfiles) fallen. El script debe reportar el error pero continuar sin colapsar.
 5. **Nombrado de Archivos en Castellano:** Cualquier archivo nuevo creado en el repositorio (especificaciones, habilidades, planes, etc.) debe tener obligatoriamente su nombre de archivo escrito en castellano (ej. `particionado_personalizado.md` en lugar de `custom_partitioning.md`).
 6. **Paciencia y Protocolo (Quien mucho abarca poco aprieta):** Nunca agrupes múltiples fases en una sola respuesta. El flujo de desarrollo es estricto y secuencial: Idea → Plan de Implementación → Spec Maestra en `.agent/specs/` → Skill de pruebas en `.agent/skills/` → Aplicación de código en `install.sh`. Debes esperar al _feedback_ o validación del usuario al final de cada paso antes de iniciar el siguiente.
+7. **🚫 GIT ES TERRITORIO EXCLUSIVO DEL USUARIO:** El agente **NUNCA** debe ejecutar comandos `git` (commit, push, pull, merge, branch, add, etc.) a no ser que el usuario lo solicite de forma **explícita y directa** en ese mismo mensaje. La gestión del repositorio es responsabilidad exclusiva del usuario.
 
 ---
 
