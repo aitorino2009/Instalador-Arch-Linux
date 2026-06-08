@@ -707,7 +707,7 @@ DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
 ENABLE_SSH="$ENABLE_SSH"
 
-# Timezone
+# Timezone=
 info "Zona horaria: \$TIMEZONE"
 ln -sf "/usr/share/zoneinfo/\$TIMEZONE" /etc/localtime
 hwclock --systohc
@@ -902,15 +902,9 @@ if [[ "\$DM_SERVICE" == "sddm" ]]; then
         fi
 
         mkdir -p /etc/sddm.conf.d
-        # Extraer el código de idioma del locale (ej: es_ES.UTF-8 → es_ES)
-        # para que SDDM muestre la fecha y etiquetas del sistema en el idioma correcto
-        SDDM_LANG="\${LOCALE%%.*}"
         cat > /etc/sddm.conf.d/theme.conf <<EOF
 [Theme]
 Current=sddm-astronaut-theme
-
-[General]
-Language=\${SDDM_LANG}
 EOF
         log "Tema SDDM Astronaut configurado con xito."
     else
