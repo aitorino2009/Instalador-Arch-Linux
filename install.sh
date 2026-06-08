@@ -707,7 +707,7 @@ DOTFILES_REPO="$DOTFILES_REPO"
 DOTFILES_SCRIPT="$DOTFILES_SCRIPT"
 ENABLE_SSH="$ENABLE_SSH"
 
-# Timezone=
+# Timezone
 info "Zona horaria: \$TIMEZONE"
 ln -sf "/usr/share/zoneinfo/\$TIMEZONE" /etc/localtime
 hwclock --systohc
