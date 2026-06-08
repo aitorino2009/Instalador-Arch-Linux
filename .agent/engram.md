@@ -50,6 +50,9 @@ Estas reglas han sido indicadas por el usuario y son de obligado cumplimiento ba
 
 * **⚠️ BUG — Corrupción gráfica extrema en X11 con VirtualBox (fondos transparentes y jeroglíficos):** Si se usa el driver VMSVGA con Aceleración 3D en X11, el driver genérico de Xorg (`modesetting`) falla catastroficamente limpiando el root window (SDDM se queda de fondo y las ventanas se corrompen). El paquete antiguo `xf86-video-vmware` que solucionaba esto **ha sido eliminado** de los repositorios de Arch en 2024. Solución: Apagar la máquina virtual y cambiar el Controlador Gráfico en VirtualBox de `VMSVGA` a `VBoxSVGA` (con la aceleración 3D activada). Esto estabiliza `modesetting`.
 
+* **⚠️ BUG — SDDM muestra fecha y etiquetas en inglés pese a tener locale en español:** SDDM corre como su propio usuario del sistema (`sddm`) y no hereda el `LANG` de `/etc/locale.conf`. Esto causa que la fecha ("Monday 8 June"), "Session", "Suspend", "Hibernate" y "Virtual Keyboard" aparezcan en inglés. Solución: añadir `Language=<código>` en la sección `[General]` de `/etc/sddm.conf.d/theme.conf`. El código se extrae con `SDDM_LANG="${LOCALE%%.*}"` (ej: `es_ES.UTF-8` → `es_ES`). Implementado en `install.sh`.
+* **README.md completamente reescrito:** El README original estaba muy desactualizado. Se ha reescrito desde cero documentando todas las funcionalidades actuales: tabla de preguntas, LUKS, BTRFS, DEs, SDDM Astronaut, tabla de compatibilidad y guía WiFi.
+
 ---
 
 ## 📊 Estado Actual del Proyecto
