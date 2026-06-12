@@ -13,28 +13,27 @@ Arranca la ISO oficial, clona el repositorio, ejecuta el script y responde las p
 # 2. Conectar a internet por WiFi (si no usas cable)
 iwctl station wlan0 connect "TuRed"
 
-# 3. Clonar y ejecutar
-pacman -Sy git
-git clone https://github.com/aitorino2009/Instalador-Arch-Linux
+# 3. Descargar y ejecutar
+curl -sL https://githubusercontent.com -o install.sh && bash install.sh
 bash Instalador-Arch-Linux/install.sh
 ```
 
-> **Nota WiFi:** Si no sabes el nombre de tu interfaz, usa `ip link` para listarla. El flujo completo de `iwctl` está al final de este documento.
+> **Nota sobre el WiFi:** Si no sabes el nombre de tu interfaz, usa `ip link` para listarla. El flujo completo de `iwctl` está al final de este documento.
 
 ---
 
 ## ¿Qué te pregunta el script?
 
-El instalador recorre tres bloques de preguntas antes de tocar nada el disco. Puedes escribir **`<` + Enter** en cualquier momento para volver al paso anterior sin perder lo ya configurado.
+El instalador recorre tres bloques de preguntas antes de tocar nada el disco. Puedes escribir **`<` + Enter** en cualquier momento para volver al paso anterior sin perder lo configurado anteriormente.
 
 ### 🖴 Bloque 1 — Sistema base
 | Pregunta | Opciones |
 |---|---|
-| **Disco destino** | Muestra los discos disponibles con tamaño y modelo |
-| **Swap** | Activar/desactivar; tamaño con validación (ej. `8G`, `512M`) |
+| **Disco destino** | Muestra los discos disponibles, su tamaño y modelo |
+| **Swap** | Activar/desactivar, tamaño con validación (ej. `8G`, `512M`) |
 | **Cifrado LUKS** | Cifrado completo del disco con contraseña |
 | **Sistema de archivos** | `ext4` (clásico) · `btrfs` (con subvolúmenes y snapshots) |
-| **Partición /home separada** | Solo disponible con ext4; el espacio restante va a /home |
+| **Partición /home separada** | Solo disponible con ext4, el espacio restante va a /home |
 | **Hostname** | Nombre del equipo en la red |
 | **Zona horaria** | Con validación automática contra `/usr/share/zoneinfo/` |
 | **Idioma** | `es_ES.UTF-8` · `en_US.UTF-8` · `ca_ES.UTF-8` · `fr_FR.UTF-8` · `de_DE.UTF-8` |
@@ -55,7 +54,7 @@ El instalador recorre tres bloques de preguntas antes de tocar nada el disco. Pu
 | **Driver de vídeo** | Intel · AMD · NVIDIA · VirtualBox · VMware · Ninguno (servidor) |
 | **Entorno de escritorio** | GNOME · KDE Plasma · XFCE · Hyprland · i3-wm · **Todos** · Ninguno |
 | **AUR helper** | `paru` · `yay` · ninguno |
-| **Dotfiles** | URL de un repositorio git + script de instalación dentro del repo |
+| **Dotfiles** | URL de un repositorio git + script de instalación dentro del repositorio |
 | **SSH** | Habilitar `sshd` al arranque |
 
 ---
@@ -95,7 +94,6 @@ El teclado X11 se configura automáticamente en `/etc/X11/xorg.conf.d/00-keyboar
 
 ### 🚀 Pantalla de inicio SDDM (Astronaut Theme)
 Cuando el Display Manager elegido es SDDM, el instalador descarga e instala automáticamente el tema **sddm-astronaut-theme**, con:
-- Fondo animado (vídeo)
 - Idioma de la interfaz sincronizado con el locale del sistema (fecha, "Sesión", "Suspender", etc.)
 - Dependencias Qt6 incluidas en la instalación base
 
@@ -154,4 +152,4 @@ ping archlinux.org                    # verificar conexión
 
 ## Licencia
 
-MIT — Úsalo, modifícalo y compártelo libremente.
+MIT: Úsalo, modifícalo y compártelo libremente.
