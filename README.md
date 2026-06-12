@@ -14,7 +14,7 @@ Arranca la ISO oficial, clona el repositorio, ejecuta el script y responde las p
 iwctl station wlan0 connect "TuRed"
 
 # 3. Descargar y ejecutar
-curl -sL https://githubusercontent.com -o install.sh && bash install.sh
+curl -sL https://raw.githubusercontent.com/aitorino2009/Instalador-Arch-Linux/refs/heads/main/install.sh -o install.sh && bash install.sh
 ```
 
 > **Nota sobre el WiFi:** Si no sabes el nombre de tu interfaz, usa `ip link` para listarla. El flujo completo de `iwctl` está al final de este documento.
