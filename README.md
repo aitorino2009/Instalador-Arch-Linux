@@ -15,7 +15,6 @@ iwctl station wlan0 connect "TuRed"
 
 # 3. Descargar y ejecutar
 curl -sL https://githubusercontent.com -o install.sh && bash install.sh
-bash Instalador-Arch-Linux/install.sh
 ```
 
 > **Nota sobre el WiFi:** Si no sabes el nombre de tu interfaz, usa `ip link` para listarla. El flujo completo de `iwctl` está al final de este documento.
