@@ -638,7 +638,14 @@ if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servid
     # Drivers: Intel usa modesetting (built-in en Xorg) + vulkan; AMD/NVIDIA tienen paquetes propios
     if [[ "$VIDEO_DRIVER" == *"Intel"* ]]; then GUI_PKGS+=" vulkan-intel intel-media-driver";
     elif [[ "$VIDEO_DRIVER" == *"AMD"* ]]; then GUI_PKGS+=" xf86-video-amdgpu vulkan-radeon";
-    elif [[ "$VIDEO_DRIVER" == *"NVIDIA"* ]]; then GUI_PKGS+=" nvidia nvidia-utils";
+    elif [[ "$VIDEO_DRIVER" == *"NVIDIA"* ]]; then
+        if [[ "$KERNEL" == "linux-lts" ]]; then
+            GUI_PKGS+=" nvidia-lts nvidia-utils"
+        elif [[ "$KERNEL" == "linux" ]]; then
+            GUI_PKGS+=" nvidia nvidia-utils"
+        else
+            GUI_PKGS+=" nvidia-dkms nvidia-utils"
+        fi
     elif [[ "$VIDEO_DRIVER" == "VirtualBox" ]]; then GUI_PKGS+=" virtualbox-guest-utils"; VM_SERVICE="vboxservice";
     elif [[ "$VIDEO_DRIVER" == "VMware" ]]; then GUI_PKGS+=" open-vm-tools"; VM_SERVICE="vmtoolsd"; fi
 
