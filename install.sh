@@ -170,7 +170,7 @@ while true; do
                     warn "Tu disco de $DISK_SIZE_GB GB es demasiado pequeño para soportar Swap. Se desactivará automáticamente."
                     SWAP_SIZE="0"
                     HISTORIAL+=("$PASO")
-                    PASO=4
+                    PASO="3_luks"
                 else
                     info "Por favor, elige un tamaño de Swap menor (máximo recomendado: ${max_swap_gb}G)."
                     SWAP_SIZE=""  # limpiar para que el default no muestre el valor inválido
@@ -813,7 +813,7 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 # initramfs
 info "Generando initramfs…"
-if [[ "$LUKS" == "s" ]]; then
+if [[ "\$LUKS" == "s" ]]; then
     sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck)/' /etc/mkinitcpio.conf
 fi
 mkinitcpio -P
@@ -872,13 +872,15 @@ if [[ "\$LUKS" == "s" ]]; then
         echo "crypthome  UUID=\${HOME_UUID}  none  luks" >> /etc/crypttab
     fi
     if [[ -n "\$PART_SWAP" ]]; then
-        # Usar PARTUUID (identificador de partición GPT) en lugar de UUID (filesystem).
-        # PARTUUID está disponible desde el inicio del arranque sin depender de udev,
-        # lo que elimina el job lento de espera de /dev/disk/by-uuid/...
-        # timeout=10 evita la espera infinita de /dev/mapper/swap si el dispositivo falla.
-        SWAP_PARTUUID=\$(blkid -s PARTUUID -o value "\$PART_SWAP")
-        SWAP_UUID=\$(blkid -s UUID -o value "\$PART_SWAP")
-        echo "swap  PARTUUID=\${SWAP_PARTUUID}  /dev/urandom  swap,cipher=aes-xts-plain64,size=256,timeout=10" >> /etc/crypttab
+        # Usar PARTUUID (GPT) o UUID (fallback para MBR) para abrir la partición de swap
+        SWAP_PARTUUID=\$(blkid -s PARTUUID -o value "\$PART_SWAP" || true)
+        SWAP_UUID=\$(blkid -s UUID -o value "\$PART_SWAP" || true)
+        if [[ -n "\$SWAP_PARTUUID" ]]; then
+            SWAP_DEV_ID="PARTUUID=\${SWAP_PARTUUID}"
+        else
+            SWAP_DEV_ID="UUID=\${SWAP_UUID}"
+        fi
+        echo "swap  \${SWAP_DEV_ID}  /dev/urandom  swap,cipher=aes-xts-plain64,size=256,timeout=10" >> /etc/crypttab
         sed -i "/UUID=\${SWAP_UUID}/d" /etc/fstab
         echo "/dev/mapper/swap  none  swap  defaults  0  0" >> /etc/fstab
     fi
