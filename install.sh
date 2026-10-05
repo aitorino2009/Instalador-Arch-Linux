@@ -465,7 +465,7 @@ fi
 # ── Particionado ───────────────────────────────────────────────────────────────
 step "·" "Particionando $DISK"
 wipefs -af "$DISK" &>/dev/null
-sgdisk -Z "$DISK" &>/dev/null
+sgdisk -Z "$DISK" &>/dev/null || true
 
 if $UEFI; then
     sgdisk -n 1:0:+512M  -t 1:ef00 -c 1:"EFI"  "$DISK"
@@ -492,6 +492,7 @@ if $UEFI; then
 else
     parted -s "$DISK" mklabel msdos
     parted -s "$DISK" mkpart primary 1MiB 3MiB
+    parted -s "$DISK" set 1 boot on
     if [[ "$SWAP_SIZE" != "0" ]]; then
         swap_mb=$(convertir_a_mb "$SWAP_SIZE")
         parted -s "$DISK" mkpart primary linux-swap 3MiB "$((3 + swap_mb))MiB"
@@ -641,14 +642,26 @@ if [[ "${DESKTOP_ENV:-Ninguno}" != "Ninguno" || "${VIDEO_DRIVER:-Ninguno (Servid
     elif [[ "$VIDEO_DRIVER" == "VirtualBox" ]]; then GUI_PKGS+=" virtualbox-guest-utils"; VM_SERVICE="vboxservice";
     elif [[ "$VIDEO_DRIVER" == "VMware" ]]; then GUI_PKGS+=" open-vm-tools"; VM_SERVICE="vmtoolsd"; fi
 
+    # Detección automática de hipervisor como salvaguarda
+    _VIRT=$(systemd-detect-virt 2>/dev/null || true)
+    if [[ "$_VIRT" == "oracle" && "$VIDEO_DRIVER" != "VirtualBox" ]]; then
+        info "VirtualBox detectado por hardware: añadiendo virtualbox-guest-utils."
+        GUI_PKGS+=" virtualbox-guest-utils"
+        VM_SERVICE="vboxservice"
+    elif [[ "$_VIRT" == "vmware" && "$VIDEO_DRIVER" != "VMware" ]]; then
+        info "VMware detectado por hardware: añadiendo open-vm-tools."
+        GUI_PKGS+=" open-vm-tools"
+        VM_SERVICE="vmtoolsd"
+    fi
+
     if [[ "$DESKTOP_ENV" == *"GNOME"* ]]; then GUI_PKGS+=" gnome gnome-tweaks gdm"; DM_SERVICE="gdm";
-    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta konsole dolphin sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"; DM_SERVICE="sddm";
+    elif [[ "$DESKTOP_ENV" == *"KDE"* ]]; then GUI_PKGS+=" plasma-meta plasma-workspace-x11 konsole dolphin sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"XFCE"* ]]; then GUI_PKGS+=" xfce4 xfce4-goodies lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
     elif [[ "$DESKTOP_ENV" == *"Hyprland"* ]]; then GUI_PKGS+=" hyprland kitty waybar wofi sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"; DM_SERVICE="sddm";
     elif [[ "$DESKTOP_ENV" == *"i3"* ]]; then GUI_PKGS+=" i3-wm i3status i3lock dmenu alacritty lightdm lightdm-gtk-greeter"; DM_SERVICE="lightdm";
     elif [[ "$DESKTOP_ENV" == *"Todos"* ]]; then
         # Instala todos los entornos. SDDM como DM unificado (soporta X11 y Wayland).
-        GUI_PKGS+=" gnome gnome-tweaks plasma-meta konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"
+        GUI_PKGS+=" gnome gnome-tweaks plasma-meta plasma-workspace-x11 konsole dolphin xfce4 xfce4-goodies hyprland kitty waybar wofi i3-wm i3status i3lock dmenu alacritty sddm qt6-5compat qt6-declarative qt6-svg qt6-multimedia qt6-multimedia-ffmpeg"
         DM_SERVICE="sddm"
     fi
 fi
@@ -699,6 +712,7 @@ PART_HOME="${PART_HOME:-}"
 PART_SWAP="${PART_SWAP:-}"
 LUKS="${LUKS:-n}"
 FS="$FS"
+VIDEO_DRIVER="$VIDEO_DRIVER"
 DESKTOP_ENV="$DESKTOP_ENV"
 DM_SERVICE="$DM_SERVICE"
 VM_SERVICE="$VM_SERVICE"
@@ -714,8 +728,10 @@ hwclock --systohc
 
 # Locale
 info "Locale: \$LOCALE"
-sed -i "s/#\${LOCALE}/\${LOCALE}/" /etc/locale.gen
-sed -i "s/#\${LANG_EXTRA}/\${LANG_EXTRA}/" /etc/locale.gen
+sed -i "s/^#\${LOCALE} /\${LOCALE} /" /etc/locale.gen
+if [[ "\$LOCALE" != "\$LANG_EXTRA" ]]; then
+    sed -i "s/^#\${LANG_EXTRA} /\${LANG_EXTRA} /" /etc/locale.gen
+fi
 locale-gen
 echo "LANG=\$LOCALE"  > /etc/locale.conf
 echo "KEYMAP=\$KEYMAP" > /etc/vconsole.conf
@@ -759,6 +775,18 @@ systemctl enable NetworkManager
 # Display Manager
 [[ -n "\$DM_SERVICE" ]] && systemctl enable "\$DM_SERVICE"
 
+# Evitar congelamiento de Wayland en GDM si estamos en VirtualBox o VM
+if [[ "\$DM_SERVICE" == "gdm" || "\$DESKTOP_ENV" == *"GNOME"* || "\$DESKTOP_ENV" == *"Todos"* ]]; then
+    if [[ "\$VIDEO_DRIVER" == "VirtualBox" ]] || systemd-detect-virt -q 2>/dev/null; then
+        mkdir -p /etc/gdm
+        cat > /etc/gdm/custom.conf <<EOF
+[daemon]
+WaylandEnable=false
+EOF
+        info "VirtualBox/VM detectado: GDM configurado en modo X11 (Wayland desactivado para evitar congelamiento)."
+    fi
+fi
+
 # Servicios de Máquina Virtual (VirtualBox / VMware)
 [[ -n "\$VM_SERVICE" ]] && systemctl enable "\$VM_SERVICE"
 
@@ -771,6 +799,9 @@ echo "root:\${ROOT_PASSWORD}" | chpasswd
 # Usuario
 useradd -m -G "\$USER_GROUPS" -s /bin/bash "\$USERNAME"
 echo "\${USERNAME}:\${USER_PASSWORD}" | chpasswd
+if [[ "\$VM_SERVICE" == "vboxservice" ]] || getent group vboxsf &>/dev/null; then
+    usermod -aG vboxsf "\$USERNAME" 2>/dev/null || true
+fi
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 # initramfs
@@ -793,10 +824,12 @@ if [[ "\$BOOTLOADER" == "grub" ]]; then
     if \$UEFI; then
         grub-install --target=x86_64-efi \
                      --efi-directory=\$ESP_DIR \
-                     --bootloader-id=GRUB --recheck
+                     --bootloader-id=GRUB --recheck \
+                     --removable
     else
         grub-install --target=i386-pc --recheck "\$DISK"
     fi
+    mkdir -p /boot/grub
     grub-mkconfig -o /boot/grub/grub.cfg
 else
     bootctl --esp-path=\$ESP_DIR install
@@ -858,6 +891,9 @@ systemctl enable reflector.timer
 # AUR helper
 if [[ -n "\$AUR_HELPER" ]]; then
     info "Compilando \$AUR_HELPER…"
+    # NOPASSWD temporal: makepkg -si llama a 'sudo pacman -U' internamente.
+    # Sin esto, sudo pide contraseña en un chroot no interactivo y la instalación se cuelga.
+    echo "\${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/99-aur-build
     sudo -u "\$USERNAME" bash -c "
         cd /tmp
         git clone https://aur.archlinux.org/\${AUR_HELPER}-bin.git
@@ -865,6 +901,7 @@ if [[ -n "\$AUR_HELPER" ]]; then
         makepkg -si --noconfirm
         rm -rf /tmp/\${AUR_HELPER}-bin
     " && log "\$AUR_HELPER instalado." || echo "  !  AUR helper falló. Instálalo luego manualmente."
+    rm -f /etc/sudoers.d/99-aur-build
 fi
 
 # Dotfiles
@@ -886,19 +923,29 @@ if [[ "\$DESKTOP_ENV" == *"Hyprland"* || "\$DESKTOP_ENV" == *"Todos"* ]]; then
     fi
 fi
 
-# Mejorar esttica de SDDM (Instalar Tema Astronaut)
+# Mejorar estética de SDDM (Instalar Tema Astronaut)
 if [[ "\$DM_SERVICE" == "sddm" ]]; then
-    info "Instalando tema premium para SDDM (Astronaut) con fondo animado…"
+    info "Instalando tema premium para SDDM (Astronaut)…"
     mkdir -p /usr/share/sddm/themes
     if git clone https://github.com/Keyitdev/sddm-astronaut-theme.git /usr/share/sddm/themes/sddm-astronaut-theme; then
         
-        # Descargar el video animado en la carpeta de Backgrounds del tema
-        info "Descargando fondo animado (vídeo)..."
-        wget -q -O /usr/share/sddm/themes/sddm-astronaut-theme/Backgrounds/video_bg.mp4 "https://wallsflow.com/index.php?do=download&id=697&hash=3fbb57169d9d09ac4f3e8d5da7b6b9fa" || true
+        # En máquinas virtuales, reproducir un vídeo MP4 continuo en SDDM satura la CPU y congela la VM.
+        # Por tanto, solo descargamos y activamos el fondo en vídeo si NO es una máquina virtual.
+        _IS_VM=false
+        if [[ "\$VIDEO_DRIVER" == "VirtualBox" || "\$VIDEO_DRIVER" == "VMware" ]] || systemd-detect-virt -q 2>/dev/null; then
+            _IS_VM=true
+        fi
 
-        # Modificar el theme.conf para usar el vídeo en lugar de la imagen png
-        if [[ -f /usr/share/sddm/themes/sddm-astronaut-theme/theme.conf ]]; then
-            sed -i 's|^Background=.*|Background="Backgrounds/video_bg.mp4"|' /usr/share/sddm/themes/sddm-astronaut-theme/theme.conf
+        if ! \$_IS_VM; then
+            info "Descargando fondo animado (vídeo)..."
+            if wget -q -O /usr/share/sddm/themes/sddm-astronaut-theme/Backgrounds/video_bg.mp4 "https://wallsflow.com/index.php?do=download&id=697&hash=3fbb57169d9d09ac4f3e8d5da7b6b9fa" && [[ -s /usr/share/sddm/themes/sddm-astronaut-theme/Backgrounds/video_bg.mp4 ]]; then
+                if [[ -f /usr/share/sddm/themes/sddm-astronaut-theme/theme.conf ]]; then
+                    sed -i 's|^Background=.*|Background="Backgrounds/video_bg.mp4"|' /usr/share/sddm/themes/sddm-astronaut-theme/theme.conf
+                fi
+                info "Fondo animado configurado."
+            fi
+        else
+            info "Máquina virtual detectada: usando fondo estático en SDDM para máxima fluidez y estabilidad."
         fi
 
         mkdir -p /etc/sddm.conf.d
@@ -906,9 +953,9 @@ if [[ "\$DM_SERVICE" == "sddm" ]]; then
 [Theme]
 Current=sddm-astronaut-theme
 EOF
-        log "Tema SDDM Astronaut configurado con xito."
+        log "Tema SDDM Astronaut configurado con éxito."
     else
-        echo "  !  Fallo al descargar el tema SDDM. Se usar el por defecto."
+        echo "  !  Fallo al descargar el tema SDDM. Se usará el por defecto."
     fi
 fi
 
